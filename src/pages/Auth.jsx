@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api';
 import { auth, googleProvider } from '../firebaseConfig';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
 import { Lock, LogIn, Mail, ShieldAlert, User } from 'lucide-react';
 
 const Auth = ({ isAdminLogin = false }) => {
@@ -20,9 +20,16 @@ const Auth = ({ isAdminLogin = false }) => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [cooldownTime, setCooldownTime] = useState(0);
   const [otpExpiryTime, setOtpExpiryTime] = useState(0);
-  const [confirmationResult, setConfirmationResult] = useState(null);
-  const [firebaseIdToken, setFirebaseIdToken] = useState('');
-  const recaptchaVerifierRef = useRef(null);
+
+  // Registration OTP states
+  const [showRegisterOtpModal, setShowRegisterOtpModal] = useState(false);
+  const [registerOtp, setRegisterOtp] = useState('');
+  const [registerToken, setRegisterToken] = useState('');
+  const [registerError, setRegisterError] = useState('');
+  const [registerSuccess, setRegisterSuccess] = useState('');
+  const [registerCooldown, setRegisterCooldown] = useState(0);
+  const [registerExpiry, setRegisterExpiry] = useState(0);
+
 
   // OTP Cooldown countdown timer
   useEffect(() => {
@@ -47,6 +54,30 @@ const Auth = ({ isAdminLogin = false }) => {
     }, 1000);
     return () => clearTimeout(timer);
   }, [otpExpiryTime]);
+
+  // Registration OTP Cooldown countdown timer
+  useEffect(() => {
+    if (registerCooldown <= 0) return;
+    const timer = setTimeout(() => {
+      setRegisterCooldown(prev => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [registerCooldown]);
+
+  // Registration OTP Expiry countdown timer
+  useEffect(() => {
+    if (registerExpiry <= 0) return;
+    const timer = setTimeout(() => {
+      setRegisterExpiry(prev => {
+        if (prev <= 1) {
+          setRegisterError("OTP has expired. Please request a new code.");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [registerExpiry]);
   const [formData, setFormData] = useState({
     name: '',
     phoneOrEmail: '',
@@ -146,7 +177,8 @@ const Auth = ({ isAdminLogin = false }) => {
         role: formData.role,
         lat: isFallbackLat,
         lng: isFallbackLng,
-        phone: enteredPhone || firebaseUser.phoneNumber || ''
+        phone: enteredPhone || firebaseUser.phoneNumber || '',
+        registration_token: registerToken
       };
       
       const nameVal = formData.name || firebaseUser.displayName;
@@ -269,42 +301,15 @@ const Auth = ({ isAdminLogin = false }) => {
       }
 
       try {
-        // Clean up any existing recaptcha verifier widget from the DOM
-        if (recaptchaVerifierRef.current) {
-          try {
-            recaptchaVerifierRef.current.clear();
-          } catch (clearErr) {
-            console.error("Error clearing existing recaptcha:", clearErr);
-          }
-          recaptchaVerifierRef.current = null;
-        }
-
-        // Set up invisible reCAPTCHA (required by Firebase Phone Auth)
-        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          size: 'invisible',
-          callback: () => {}
-        });
-
-        // Send OTP via Firebase (FREE - up to 10,000/month)
-        const result = await signInWithPhoneNumber(auth, '+91' + input, recaptchaVerifierRef.current);
-        setConfirmationResult(result);
+        await authAPI.forgotPassword(input);
         setForgotPhone(input);
-        setForgotSuccess("OTP sent to your mobile number via Firebase.");
+        setForgotSuccess("OTP sent to your mobile number.");
         setCooldownTime(60);
         setOtpExpiryTime(300); // 5 minutes
         setForgotStep(2);
       } catch (err) {
         console.error(err);
-        // Reset reCAPTCHA on error so it can be retried
-        if (recaptchaVerifierRef.current) {
-          try {
-            recaptchaVerifierRef.current.clear();
-          } catch (clearErr) {
-            console.error("Error clearing recaptcha on catch:", clearErr);
-          }
-          recaptchaVerifierRef.current = null;
-        }
-        setForgotError(err.message?.replace('Firebase: ', '') || "Failed to send OTP. Please try again.");
+        setForgotError(err.response?.data?.msg || "Failed to send OTP. Please try again.");
       } finally {
         setSendingReset(false);
       }
@@ -325,28 +330,14 @@ const Auth = ({ isAdminLogin = false }) => {
     }
 
     try {
-      // Verify OTP with Firebase directly (no backend call needed)
-      if (!confirmationResult) {
-        setForgotError("Session expired. Please go back and request a new OTP.");
-        setSendingReset(false);
-        return;
-      }
-      const userCredential = await confirmationResult.confirm(otpVal);
-      const idToken = await userCredential.user.getIdToken();
-      setFirebaseIdToken(idToken);
+      const res = await authAPI.verifyRecoveryOtp(forgotPhone, otpVal);
+      setForgotResetToken(res.data.reset_token);
       setForgotSuccess('');
       setForgotStep(3);
       setOtpExpiryTime(0);
     } catch (err) {
       console.error(err);
-      const code = err.code || '';
-      if (code === 'auth/invalid-verification-code') {
-        setForgotError("Incorrect OTP. Please check and try again.");
-      } else if (code === 'auth/code-expired') {
-        setForgotError("OTP has expired. Please go back and request a new one.");
-      } else {
-        setForgotError(err.message?.replace('Firebase: ', '') || "Invalid OTP. Please try again.");
-      }
+      setForgotError(err.response?.data?.msg || "Invalid OTP. Please try again.");
     } finally {
       setSendingReset(false);
     }
@@ -382,7 +373,7 @@ const Auth = ({ isAdminLogin = false }) => {
     }
 
     try {
-      await authAPI.resetPasswordFirebase(forgotPhone, firebaseIdToken, pwd);
+      await authAPI.resetPassword(forgotPhone, forgotResetToken, pwd);
       
       // Session Invalidation: Logout client sessions
       localStorage.removeItem('token');
@@ -446,7 +437,27 @@ const Auth = ({ isAdminLogin = false }) => {
     if (isLogin) {
        handleActionWithLocation(() => signInWithEmailAndPassword(auth, authEmail, formData.password));
     } else {
-       handleActionWithLocation(() => createUserWithEmailAndPassword(auth, authEmail, formData.password));
+       const isPhone = /^\d{10}$/.test(formData.phoneOrEmail.trim());
+       if (isPhone) {
+          setLoading(true);
+          setErrorMsg('');
+          try {
+             const phoneVal = formData.phoneOrEmail.trim();
+             await authAPI.registerRequestOtp(phoneVal);
+             setRegisterSuccess("Verification OTP sent to your phone number.");
+             setRegisterError('');
+             setRegisterCooldown(60);
+             setRegisterExpiry(300);
+             setShowRegisterOtpModal(true);
+          } catch (err) {
+             console.error(err);
+             setErrorMsg(err.response?.data?.msg || "Failed to request signup OTP. Please try again.");
+          } finally {
+             setLoading(false);
+          }
+       } else {
+          handleActionWithLocation(() => createUserWithEmailAndPassword(auth, authEmail, formData.password));
+       }
     }
   };
 
@@ -460,8 +471,6 @@ const Auth = ({ isAdminLogin = false }) => {
 
   return (
     <div className="container flex justify-center items-center" style={{ minHeight: 'calc(100vh - 80px)', padding: '2rem 1rem' }}>
-      {/* Invisible reCAPTCHA container required by Firebase Phone Auth */}
-      <div id="recaptcha-container"></div>
       <div className="card glass animate-fade-in" style={{ width: '100%', maxWidth: '420px', padding: '2.5rem', borderRadius: '2rem' }}>
         <h2 className="text-3xl font-black text-center mb-2 text-gray-900">
           {isAdminLogin ? 'Panchayat Manager Portal' : (isLogin ? 'Welcome Back' : 'Join Naadan')}
@@ -837,6 +846,116 @@ const Auth = ({ isAdminLogin = false }) => {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {showRegisterOtpModal && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full border border-gray-150 shadow-2xl relative animate-fade-in">
+            <h3 className="text-2xl font-black text-gray-900 mb-2">Verify Mobile</h3>
+            <p className="text-xs text-gray-500 font-semibold mb-2">
+              Enter the 6-digit OTP code sent to your phone <strong>{formData.phoneOrEmail}</strong>.
+            </p>
+            <div className="flex justify-between items-center bg-blue-50 text-blue-800 px-3.5 py-2 rounded-xl text-xs font-bold border border-blue-100 mb-4">
+              <span>⏳ OTP Expiry Countdown</span>
+              <span className="font-black text-sm">{formatTime(registerExpiry)}</span>
+            </div>
+            
+            {registerSuccess && (
+              <div className="bg-green-50 text-green-700 p-4 rounded-xl border border-green-200 mb-4 text-xs font-medium text-center">
+                {registerSuccess}
+              </div>
+            )}
+            {registerError && (
+              <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200 mb-4 text-xs font-medium text-center">
+                {registerError}
+              </div>
+            )}
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setLoading(true);
+              setRegisterError('');
+              setRegisterSuccess('');
+              const phoneVal = formData.phoneOrEmail.trim();
+              try {
+                const res = await authAPI.registerVerifyOtp(phoneVal, registerOtp);
+                setRegisterToken(res.data.registration_token);
+                setShowRegisterOtpModal(false);
+                
+                // complete signup in Firebase
+                const authEmail = `${phoneVal}@naadan.com`;
+                handleActionWithLocation(() => createUserWithEmailAndPassword(auth, authEmail, formData.password));
+              } catch (err) {
+                setRegisterError(err.response?.data?.msg || "Invalid OTP. Please check and try again.");
+                setLoading(false);
+              }
+            }} className="space-y-4">
+              <div className="form-group">
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 ml-1">Verification OTP</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={6}
+                  placeholder="Enter 6-digit OTP"
+                  value={registerOtp}
+                  onChange={e => setRegisterOtp(e.target.value.replace(/\D/g, ''))}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-black text-center text-xl tracking-widest text-gray-800"
+                />
+              </div>
+
+              <div className="flex gap-2 text-xs font-semibold justify-center">
+                <span className="text-gray-400">Didn't receive the OTP?</span>
+                {registerCooldown > 0 ? (
+                  <span className="text-gray-500">Resend in {registerCooldown}s</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setRegisterError('');
+                      setRegisterSuccess('');
+                      try {
+                        const phoneVal = formData.phoneOrEmail.trim();
+                        await authAPI.registerRequestOtp(phoneVal);
+                        setRegisterSuccess("OTP resent successfully.");
+                        setRegisterCooldown(60);
+                        setRegisterExpiry(300);
+                      } catch (err) {
+                        setRegisterError(err.response?.data?.msg || "Failed to resend OTP.");
+                      }
+                    }}
+                    className="text-green-600 hover:text-green-700 font-bold border-none bg-transparent cursor-pointer underline"
+                  >
+                    Resend OTP
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRegisterOtpModal(false);
+                    setRegisterOtp('');
+                    setRegisterToken('');
+                    setRegisterSuccess('');
+                    setRegisterError('');
+                    setRegisterExpiry(0);
+                  }}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl border-none cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white font-extrabold rounded-xl border-none cursor-pointer transition-all shadow-md"
+                >
+                  {loading ? "Verifying..." : "Verify Code"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -29,11 +29,25 @@ const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [recentActivity, setRecentActivity] = useState(null);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [smsStats, setSmsStats] = useState(null);
+  const [loadingSms, setLoadingSms] = useState(false);
 
   // General State
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+
+  const fetchSmsStats = async () => {
+    try {
+      setLoadingSms(true);
+      const res = await adminAPI.getSmsStats();
+      setSmsStats(res.data);
+    } catch (err) {
+      console.error("Failed to fetch SMS stats:", err);
+    } finally {
+      setLoadingSms(false);
+    }
+  };
 
   // Check auth and role
   useEffect(() => {
@@ -46,6 +60,7 @@ const AdminDashboard = () => {
       fetchMarketPrices();
       fetchPendingVerifications();
       fetchDashboardStats();
+      fetchSmsStats();
     }
   }, [navigate]);
 
@@ -345,6 +360,45 @@ const AdminDashboard = () => {
                     </span>
                   </div>
                 </div>
+              </div>
+              
+              {/* SMS Telemetry Section */}
+              <div className="bg-white border border-gray-150 rounded-[2rem] p-8 shadow-sm">
+                <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
+                  <Sliders className="text-purple-600 animate-pulse" size={24} /> SMS Telemetry &amp; Cost Control
+                </h3>
+                {loadingSms && !smsStats ? (
+                  <div className="flex justify-center items-center py-6">
+                    <Loader2 className="animate-spin text-purple-600" size={24} />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+                    <div className="bg-gray-50 border border-gray-100 p-4 rounded-2xl">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sent Today</span>
+                      <span className="text-xl font-extrabold text-gray-800">{smsStats?.sent_today || 0}</span>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 p-4 rounded-2xl">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sent This Month</span>
+                      <span className="text-xl font-extrabold text-gray-800">{smsStats?.sent_this_month || 0}</span>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 p-4 rounded-2xl">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">OTPs Sent</span>
+                      <span className="text-xl font-extrabold text-gray-800">{smsStats?.otp_count || 0}</span>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 p-4 rounded-2xl">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Order Alerts</span>
+                      <span className="text-xl font-extrabold text-gray-800">{smsStats?.order_alert_count || 0}</span>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 p-4 rounded-2xl">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Failed SMS</span>
+                      <span className="text-xl font-extrabold text-red-600">{smsStats?.failed_count || 0}</span>
+                    </div>
+                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100 p-4 rounded-2xl">
+                      <span className="block text-[10px] font-bold text-purple-600 uppercase tracking-wider">Estimated Cost</span>
+                      <span className="text-xl font-black text-purple-700">&#8377;{smsStats?.estimated_cost || "0.00"}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Recent Activity Log Lists */}

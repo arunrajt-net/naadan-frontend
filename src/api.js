@@ -55,6 +55,8 @@ export const authAPI = {
   verifyRecoveryOtp: (phone, otp) => api.post('/auth/verify-recovery-otp', { phone, otp }),
   resetPassword: (phone, resetToken, newPassword) => api.post('/auth/reset-password', { phone, reset_token: resetToken, new_password: newPassword }),
   resetPasswordFirebase: (phone, firebaseIdToken, newPassword) => api.post('/auth/reset-password-firebase', { phone, firebase_id_token: firebaseIdToken, new_password: newPassword }),
+  registerRequestOtp: (phone) => api.post('/auth/register-request-otp', { phone }),
+  registerVerifyOtp: (phone, otp) => api.post('/auth/register-verify-otp', { phone, otp }),
 };
 
 export const productsAPI = {
@@ -93,6 +95,7 @@ export const adminAPI = {
   approveFarmer: (userId) => api.post(`/market/verify/approve/${userId}`),
   rejectFarmer: (userId) => api.post(`/market/verify/reject/${userId}`),
   getDashboardStats: () => api.get('/admin/dashboard-stats'),
+  getSmsStats: () => api.get('/admin/sms-stats'),
 };
 
 export const paymentAPI = {
