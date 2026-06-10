@@ -269,13 +269,22 @@ const Auth = ({ isAdminLogin = false }) => {
       }
 
       try {
-        // Set up invisible reCAPTCHA (required by Firebase Phone Auth)
-        if (!recaptchaVerifierRef.current) {
-          recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-            size: 'invisible',
-            callback: () => {}
-          });
+        // Clean up any existing recaptcha verifier widget from the DOM
+        if (recaptchaVerifierRef.current) {
+          try {
+            recaptchaVerifierRef.current.clear();
+          } catch (clearErr) {
+            console.error("Error clearing existing recaptcha:", clearErr);
+          }
+          recaptchaVerifierRef.current = null;
         }
+
+        // Set up invisible reCAPTCHA (required by Firebase Phone Auth)
+        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: () => {}
+        });
+
         // Send OTP via Firebase (FREE - up to 10,000/month)
         const result = await signInWithPhoneNumber(auth, '+91' + input, recaptchaVerifierRef.current);
         setConfirmationResult(result);
@@ -287,7 +296,14 @@ const Auth = ({ isAdminLogin = false }) => {
       } catch (err) {
         console.error(err);
         // Reset reCAPTCHA on error so it can be retried
-        recaptchaVerifierRef.current = null;
+        if (recaptchaVerifierRef.current) {
+          try {
+            recaptchaVerifierRef.current.clear();
+          } catch (clearErr) {
+            console.error("Error clearing recaptcha on catch:", clearErr);
+          }
+          recaptchaVerifierRef.current = null;
+        }
         setForgotError(err.message?.replace('Firebase: ', '') || "Failed to send OTP. Please try again.");
       } finally {
         setSendingReset(false);
