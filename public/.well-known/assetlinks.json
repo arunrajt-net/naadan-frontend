@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.web.naadan_ebd6e.twa",
+      "sha256_cert_fingerprints": [
+        "C1:3F:88:C9:AD:96:41:0D:09:FB:B0:0D:D7:04:2A:79:17:BC:6A:25:85:2B:F4:20:0A:7E:0E:8E:1A:B9:91:5B"
+      ]
+    }
+  }
+]

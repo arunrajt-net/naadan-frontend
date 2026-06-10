@@ -1,0 +1,354 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Outfit', system-ui, sans-serif;
+  --color-brand-primary: #2E7D32;
+  --color-brand-secondary: #FF9800;
+  --color-green-750: #276228;
+}
+
+/* ===========================
+   BASE RESETS FOR MOBILE
+=========================== */
+@layer base {
+  *, *::before, *::after {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+  
+  html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply font-sans bg-gray-50 text-gray-900;
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Bottom safe area for notched phones */
+  #root {
+    min-height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  /* Prevent zoom on input focus (iOS) */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Better scrollbars */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+}
+
+/* ===========================
+   COMPONENTS
+=========================== */
+@layer components {
+
+  /* Glass card effect */
+  .glass {
+    @apply bg-white/95 backdrop-blur-md border border-gray-100;
+  }
+
+  /* Buttons - minimum 48px touch target */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-2xl font-semibold transition-all cursor-pointer border-none outline-none;
+    min-height: 48px;
+    padding: 0 20px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-primary {
+    @apply bg-green-700 text-white;
+    box-shadow: 0 4px 15px rgba(46,125,50,0.35);
+  }
+  .btn-primary:hover { @apply bg-green-800; }
+  .btn-primary:active { box-shadow: 0 2px 8px rgba(46,125,50,0.25); }
+
+  .btn-accent {
+    @apply bg-orange-500 text-white;
+    box-shadow: 0 4px 15px rgba(255,152,0,0.35);
+  }
+  .btn-accent:hover { @apply bg-orange-600; }
+
+  .btn-outline {
+    @apply bg-transparent text-green-700;
+    box-shadow: inset 0 0 0 2px #2E7D32;
+  }
+  .btn-outline:hover { @apply bg-green-50; }
+
+  .btn-ghost {
+    @apply bg-transparent text-gray-700 hover:bg-gray-100;
+    box-shadow: none;
+  }
+
+  /* Form inputs - 52px height, large text */
+  .form-control {
+    @apply w-full px-4 border border-gray-200 rounded-2xl bg-white transition-all;
+    min-height: 52px;
+    font-size: 16px;
+    color: #111827;
+  }
+  .form-control:focus {
+    @apply outline-none border-green-600;
+    box-shadow: 0 0 0 3px rgba(46,125,50,0.12);
+  }
+  .form-control::placeholder { color: #9ca3af; }
+
+  /* Cards - mobile friendly */
+  .card {
+    @apply bg-white rounded-3xl border border-gray-100 overflow-hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .card:active { transform: scale(0.99); box-shadow: 0 1px 6px rgba(0,0,0,0.08); }
+  @media (min-width: 768px) {
+    .card:hover { transform: translateY(-4px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
+  }
+
+  /* Status badges */
+  .badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold;
+  }
+  .badge-green  { @apply bg-green-100 text-green-800; }
+  .badge-yellow { @apply bg-yellow-100 text-yellow-800; }
+  .badge-blue   { @apply bg-blue-100 text-blue-800; }
+  .badge-red    { @apply bg-red-100 text-red-800; }
+  .badge-gray   { @apply bg-gray-100 text-gray-600; }
+
+  /* Section header */
+  .section-title {
+    @apply text-xl font-extrabold text-gray-900;
+  }
+  .section-sub {
+    @apply text-sm text-gray-500 font-medium;
+  }
+
+  /* Bottom navigation bar (mobile) */
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 9000;
+    background: white;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 8px 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
+  }
+
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    padding: 4px 8px;
+    min-height: 48px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: all 0.15s ease;
+    border-radius: 12px;
+  }
+  .bottom-nav-item span { font-size: 11px; font-weight: 600; color: #6b7280; }
+  .bottom-nav-item.active span { color: #2E7D32; }
+  .bottom-nav-item svg { color: #6b7280; }
+  .bottom-nav-item.active svg { color: #2E7D32; }
+  .bottom-nav-item:active { background: #f0fdf4; }
+
+  /* ================================================================
+   * FLOATING ACTION BUTTONS (FAB) - Map Toggle & Cart
+   * Always float above the bottom nav bar, safe on all devices.
+   * Base clearance: 72px (bottom-nav) + env(safe-area-inset-bottom)
+   * ================================================================ */
+
+  /* CSS custom property for floating button safe bottom offset */
+  :root {
+    --fab-bottom-base: calc(72px + env(safe-area-inset-bottom));
+    --fab-bottom-primary: calc(var(--fab-bottom-base) + 16px);   /* map toggle */
+    --fab-bottom-secondary: calc(var(--fab-bottom-base) + 88px); /* cart, stacked above toggle */
+  }
+
+  /* Map / List toggle FAB */
+  .map-fab-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    background: #111827;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 13px 22px;
+    border-radius: 999px;
+    /* Minimum touch target: 48px height */
+    min-height: 48px;
+    min-width: 48px;
+    /* Layered shadow so it reads as an elevated action button */
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.10),
+      0 8px 24px rgba(0,0,0,0.20),
+      0 20px 48px rgba(0,0,0,0.14);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    transition: background 0.18s ease, box-shadow 0.18s ease;
+    white-space: nowrap;
+  }
+  .map-fab-toggle:hover {
+    background: #1f2937;
+    box-shadow:
+      0 4px 8px rgba(0,0,0,0.12),
+      0 14px 32px rgba(0,0,0,0.24),
+      0 28px 56px rgba(0,0,0,0.16);
+  }
+  .map-fab-toggle:active {
+    background: #374151;
+  }
+
+  /* First-load pulse animation for map toggle */
+  @keyframes fab-pulse-once {
+    0%   { box-shadow: 0 0 0 0   rgba(17,24,39,0.45), 0 8px 24px rgba(0,0,0,0.20); }
+    60%  { box-shadow: 0 0 0 14px rgba(17,24,39,0.00), 0 8px 24px rgba(0,0,0,0.20); }
+    100% { box-shadow: 0 0 0 0   rgba(17,24,39,0.00), 0 8px 24px rgba(0,0,0,0.20); }
+  }
+  .map-fab-toggle {
+    animation: fab-pulse-once 0.8s ease-out 0.5s 1 both;
+  }
+
+  /* Cart FAB pulse */
+  @keyframes cart-fab-pulse {
+    0%, 100% { transform: scale(1)   translateY(0);   }
+    30%       { transform: scale(1.1) translateY(-3px); }
+    60%       { transform: scale(0.96) translateY(1px); }
+  }
+  .cart-fab-pulse {
+    animation: cart-fab-pulse 2.4s ease-in-out infinite;
+  }
+
+  /* Landscape mode: tighten bottom offset slightly */
+  @media (max-height: 500px) and (orientation: landscape) {
+    :root {
+      --fab-bottom-base: calc(0px + env(safe-area-inset-bottom));
+      --fab-bottom-primary: calc(var(--fab-bottom-base) + 12px);
+    }
+    /* Hide bottom nav in landscape (it stacks content); FABs float from bottom */
+    .bottom-nav { display: none; }
+  }
+
+  /* Desktop: hide mobile FABs entirely */
+  @media (min-width: 1024px) {
+    .map-fab-toggle { display: none; }
+    .cart-fab-pulse { /* no adjustment needed on desktop */ }
+  }
+
+
+  /* Page container with bottom nav spacing */
+  .page-with-nav {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  /* Skeleton loading */
+  .skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+    border-radius: 12px;
+  }
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Notification dot */
+  .notif-dot {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 18px;
+    height: 18px;
+    background: #ef4444;
+    color: white;
+    font-size: 10px;
+    font-weight: 800;
+    border-radius: 99px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+  }
+
+  /* Pull to refresh hint */
+  .refresh-hint {
+    @apply text-xs text-gray-400 font-medium text-center py-2;
+  }
+
+  /* Green gradient hero */
+  .hero-gradient {
+    background: linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 70%, #43A047 100%);
+  }
+
+  /* Trust badge */
+  .trust-badge {
+    @apply inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-50 px-3 py-1.5 rounded-full;
+  }
+
+  /* Floating action button */
+  .fab {
+    position: fixed;
+    z-index: 800;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    transition: all 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .fab:active { transform: scale(0.93); }
+
+  /* Smooth page transitions */
+  .page-enter { animation: pageSlideIn 0.25s ease forwards; }
+  @keyframes pageSlideIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Input group */
+  .input-group {
+    @apply relative;
+  }
+  .input-group .input-icon {
+    @apply absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none;
+  }
+  .input-group .form-control { @apply pl-11; }
+
+  /* Order status colors */
+  .status-pending     { @apply bg-gray-100 text-gray-600; }
+  .status-waiting     { @apply bg-yellow-100 text-yellow-700; }
+  .status-confirmed   { @apply bg-green-100 text-green-700; }
+  .status-shipped     { @apply bg-blue-100 text-blue-700; }
+  .status-delivered   { @apply bg-indigo-100 text-indigo-700; }
+  .status-completed   { @apply bg-emerald-100 text-emerald-800; }
+  .status-rejected    { @apply bg-red-100 text-red-700; }
+}
