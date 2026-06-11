@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api';
 import { auth, googleProvider } from '../firebaseConfig';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail, RecaptchaVerifier, signInWithPhoneNumber, updatePassword } from 'firebase/auth';
 import { Lock, LogIn, Mail, ShieldAlert, User } from 'lucide-react';
 
 const Auth = ({ isAdminLogin = false }) => {
@@ -55,13 +55,20 @@ const Auth = ({ isAdminLogin = false }) => {
       window.recaptchaVerifier = null;
     }
     
-    // Ensure the element actually exists in the DOM before creating
-    const container = document.getElementById('recaptcha-container');
-    if (!container) {
-      const newContainer = document.createElement('div');
-      newContainer.id = 'recaptcha-container';
-      document.body.appendChild(newContainer);
+    // Completely remove the old element if it exists to reset reCAPTCHA rendering
+    const oldContainer = document.getElementById('recaptcha-container');
+    if (oldContainer) {
+      try {
+        oldContainer.remove();
+      } catch (e) {
+        console.warn("Failed to remove old recaptcha container:", e);
+      }
     }
+    
+    // Create a fresh DOM element at the bottom of the body
+    const newContainer = document.createElement('div');
+    newContainer.id = 'recaptcha-container';
+    document.body.appendChild(newContainer);
 
     window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
       size: 'invisible',
@@ -442,6 +449,9 @@ const Auth = ({ isAdminLogin = false }) => {
 
     try {
       if (smsProvider === 'FIREBASE') {
+        if (!forgotResetToken) {
+          throw new Error("Verification session expired. Please try again.");
+        }
         await authAPI.resetPasswordFirebase(forgotPhone, forgotResetToken, pwd);
       } else {
         await authAPI.resetPassword(forgotPhone, forgotResetToken, pwd);
