@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api';
 import { auth, googleProvider } from '../firebaseConfig';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { Lock, LogIn, Mail, ShieldAlert, User } from 'lucide-react';
 
 const Auth = ({ isAdminLogin = false }) => {
@@ -29,6 +29,50 @@ const Auth = ({ isAdminLogin = false }) => {
   const [registerSuccess, setRegisterSuccess] = useState('');
   const [registerCooldown, setRegisterCooldown] = useState(0);
   const [registerExpiry, setRegisterExpiry] = useState(0);
+
+  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [smsProvider, setSmsProvider] = useState('MOCK');
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await authAPI.getAuthConfig();
+        setSmsProvider(res.data.sms_provider);
+      } catch (err) {
+        console.error("Failed to fetch SMS provider config:", err);
+      }
+    };
+    fetchConfig();
+  }, []);
+
+  const setupRecaptcha = () => {
+    if (window.recaptchaVerifier) {
+      try {
+        window.recaptchaVerifier.clear();
+      } catch (e) {
+        console.warn("Failed to clear existing recaptcha verifier:", e);
+      }
+      window.recaptchaVerifier = null;
+    }
+    
+    // Ensure the element actually exists in the DOM before creating
+    const container = document.getElementById('recaptcha-container');
+    if (!container) {
+      const newContainer = document.createElement('div');
+      newContainer.id = 'recaptcha-container';
+      document.body.appendChild(newContainer);
+    }
+
+    window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+      size: 'invisible',
+      callback: (response) => {
+        // reCAPTCHA solved
+      },
+      'expired-callback': () => {
+        // Response expired
+      }
+    });
+  };
 
 
   // OTP Cooldown countdown timer
@@ -261,7 +305,7 @@ const Auth = ({ isAdminLogin = false }) => {
   };
 
   const handleRequestRecoveryOtp = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setSendingReset(true);
     setForgotSuccess('');
     setForgotError('');
@@ -301,15 +345,29 @@ const Auth = ({ isAdminLogin = false }) => {
       }
 
       try {
-        await authAPI.forgotPassword(input);
-        setForgotPhone(input);
-        setForgotSuccess("OTP sent to your mobile number.");
-        setCooldownTime(60);
-        setOtpExpiryTime(300); // 5 minutes
-        setForgotStep(2);
+        if (smsProvider === 'FIREBASE') {
+          setupRecaptcha();
+          const appVerifier = window.recaptchaVerifier;
+          const formattedPhone = '+91' + input;
+          const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+          setConfirmationResult(confirmation);
+          setForgotPhone(input);
+          setForgotSuccess("OTP sent to your mobile number via Firebase.");
+          setCooldownTime(60);
+          setOtpExpiryTime(300); // 5 minutes
+          setForgotStep(2);
+        } else {
+          await authAPI.forgotPassword(input);
+          setForgotPhone(input);
+          setForgotSuccess("OTP sent to your mobile number.");
+          setCooldownTime(60);
+          setOtpExpiryTime(300); // 5 minutes
+          setForgotStep(2);
+        }
       } catch (err) {
-        console.error(err);
-        setForgotError(err.response?.data?.msg || "Failed to send OTP. Please try again.");
+        console.error("Firebase Send OTP Error Details:", err);
+        const errorDetails = err.code || err.message || JSON.stringify(err);
+        setForgotError(`Failed to send OTP: ${errorDetails}`);
       } finally {
         setSendingReset(false);
       }
@@ -330,14 +388,24 @@ const Auth = ({ isAdminLogin = false }) => {
     }
 
     try {
-      const res = await authAPI.verifyRecoveryOtp(forgotPhone, otpVal);
-      setForgotResetToken(res.data.reset_token);
-      setForgotSuccess('');
-      setForgotStep(3);
-      setOtpExpiryTime(0);
+      if (smsProvider === 'FIREBASE' && confirmationResult) {
+        const result = await confirmationResult.confirm(otpVal);
+        const idToken = await result.user.getIdToken();
+        setForgotResetToken(idToken);
+        setForgotSuccess('');
+        setForgotStep(3);
+        setOtpExpiryTime(0);
+      } else {
+        const res = await authAPI.verifyRecoveryOtp(forgotPhone, otpVal);
+        setForgotResetToken(res.data.reset_token);
+        setForgotSuccess('');
+        setForgotStep(3);
+        setOtpExpiryTime(0);
+      }
     } catch (err) {
       console.error(err);
-      setForgotError(err.response?.data?.msg || "Invalid OTP. Please try again.");
+      const errMsg = err.response?.data?.msg || err.message || "Invalid OTP. Please try again.";
+      setForgotError(errMsg.replace('Firebase: ', ''));
     } finally {
       setSendingReset(false);
     }
@@ -373,7 +441,11 @@ const Auth = ({ isAdminLogin = false }) => {
     }
 
     try {
-      await authAPI.resetPassword(forgotPhone, forgotResetToken, pwd);
+      if (smsProvider === 'FIREBASE') {
+        await authAPI.resetPasswordFirebase(forgotPhone, forgotResetToken, pwd);
+      } else {
+        await authAPI.resetPassword(forgotPhone, forgotResetToken, pwd);
+      }
       
       // Session Invalidation: Logout client sessions
       localStorage.removeItem('token');
@@ -393,6 +465,7 @@ const Auth = ({ isAdminLogin = false }) => {
       setNewPassword('');
       setConfirmNewPassword('');
       setForgotStep(1);
+      setConfirmationResult(null);
     } catch (err) {
       console.error(err);
       setForgotError(err.response?.data?.msg || "Failed to reset password.");
@@ -438,7 +511,7 @@ const Auth = ({ isAdminLogin = false }) => {
        handleActionWithLocation(() => signInWithEmailAndPassword(auth, authEmail, formData.password));
     } else {
        const isPhone = /^\d{10}$/.test(formData.phoneOrEmail.trim());
-       if (isPhone) {
+       if (isPhone && smsProvider !== 'FIREBASE') {
           setLoading(true);
           setErrorMsg('');
           try {
@@ -451,7 +524,8 @@ const Auth = ({ isAdminLogin = false }) => {
              setShowRegisterOtpModal(true);
           } catch (err) {
              console.error(err);
-             setErrorMsg(err.response?.data?.msg || "Failed to request signup OTP. Please try again.");
+             const errMsg = err.response?.data?.msg || err.message || "Failed to request signup OTP. Please try again.";
+             setErrorMsg(errMsg.replace('Firebase: ', ''));
           } finally {
              setLoading(false);
           }
@@ -880,15 +954,43 @@ const Auth = ({ isAdminLogin = false }) => {
               setRegisterSuccess('');
               const phoneVal = formData.phoneOrEmail.trim();
               try {
-                const res = await authAPI.registerVerifyOtp(phoneVal, registerOtp);
-                setRegisterToken(res.data.registration_token);
-                setShowRegisterOtpModal(false);
-                
-                // complete signup in Firebase
-                const authEmail = `${phoneVal}@naadan.com`;
-                handleActionWithLocation(() => createUserWithEmailAndPassword(auth, authEmail, formData.password));
+                if (smsProvider === 'FIREBASE' && confirmationResult) {
+                  const result = await confirmationResult.confirm(registerOtp);
+                  const idToken = await result.user.getIdToken();
+                  
+                  // Call register-firebase to create the account in both Firebase and SQLite
+                  await authAPI.registerFirebase({
+                    phone: phoneVal,
+                    name: formData.name,
+                    password: formData.password,
+                    role: formData.role,
+                    firebase_id_token: idToken,
+                    lat: 10.0,
+                    lng: 76.0
+                  });
+                  
+                  setShowRegisterOtpModal(false);
+                  setConfirmationResult(null);
+                  
+                  // Log out of the temporary phone authentication session
+                  await auth.signOut();
+                  
+                  // Sign in with the newly created email/password account
+                  const authEmail = `${phoneVal}@naadan.com`;
+                  await handleActionWithLocation(() => signInWithEmailAndPassword(auth, authEmail, formData.password));
+                } else {
+                  const res = await authAPI.registerVerifyOtp(phoneVal, registerOtp);
+                  setRegisterToken(res.data.registration_token);
+                  setShowRegisterOtpModal(false);
+                  
+                  // complete signup in Firebase
+                  const authEmail = `${phoneVal}@naadan.com`;
+                  handleActionWithLocation(() => createUserWithEmailAndPassword(auth, authEmail, formData.password));
+                }
               } catch (err) {
-                setRegisterError(err.response?.data?.msg || "Invalid OTP. Please check and try again.");
+                console.error(err);
+                const errMsg = err.response?.data?.msg || err.message || "Invalid OTP. Please check and try again.";
+                setRegisterError(errMsg.replace('Firebase: ', ''));
                 setLoading(false);
               }
             }} className="space-y-4">
@@ -917,12 +1019,23 @@ const Auth = ({ isAdminLogin = false }) => {
                       setRegisterSuccess('');
                       try {
                         const phoneVal = formData.phoneOrEmail.trim();
-                        await authAPI.registerRequestOtp(phoneVal);
-                        setRegisterSuccess("OTP resent successfully.");
+                        if (smsProvider === 'FIREBASE') {
+                          setupRecaptcha();
+                          const appVerifier = window.recaptchaVerifier;
+                          const formattedPhone = '+91' + phoneVal;
+                          const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+                          setConfirmationResult(confirmation);
+                          setRegisterSuccess("OTP resent successfully via Firebase.");
+                        } else {
+                          await authAPI.registerRequestOtp(phoneVal);
+                          setRegisterSuccess("OTP resent successfully.");
+                        }
                         setRegisterCooldown(60);
                         setRegisterExpiry(300);
                       } catch (err) {
-                        setRegisterError(err.response?.data?.msg || "Failed to resend OTP.");
+                        console.error(err);
+                        const errMsg = err.response?.data?.msg || err.message || "Failed to resend OTP.";
+                        setRegisterError(errMsg.replace('Firebase: ', ''));
                       }
                     }}
                     className="text-green-600 hover:text-green-700 font-bold border-none bg-transparent cursor-pointer underline"
@@ -942,6 +1055,7 @@ const Auth = ({ isAdminLogin = false }) => {
                     setRegisterSuccess('');
                     setRegisterError('');
                     setRegisterExpiry(0);
+                    setConfirmationResult(null);
                   }}
                   className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl border-none cursor-pointer transition-colors"
                 >
@@ -959,6 +1073,7 @@ const Auth = ({ isAdminLogin = false }) => {
           </div>
         </div>
       )}
+      <div id="recaptcha-container"></div>
     </div>
   );
 };

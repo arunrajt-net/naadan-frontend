@@ -57,6 +57,8 @@ export const authAPI = {
   resetPasswordFirebase: (phone, firebaseIdToken, newPassword) => api.post('/auth/reset-password-firebase', { phone, firebase_id_token: firebaseIdToken, new_password: newPassword }),
   registerRequestOtp: (phone) => api.post('/auth/register-request-otp', { phone }),
   registerVerifyOtp: (phone, otp) => api.post('/auth/register-verify-otp', { phone, otp }),
+  getAuthConfig: () => api.get('/auth/config'),
+  registerFirebase: (data) => api.post('/auth/register-firebase', data),
 };
 
 export const productsAPI = {
