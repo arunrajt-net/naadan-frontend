@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api';
 import { auth, googleProvider } from '../firebaseConfig';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail, RecaptchaVerifier, signInWithPhoneNumber, updatePassword } from 'firebase/auth';
-import { Lock, LogIn, Mail, ShieldAlert, User } from 'lucide-react';
+import { Lock, LogIn, Mail, ShieldAlert, User, Eye, EyeOff } from 'lucide-react';
 
 const Auth = ({ isAdminLogin = false }) => {
   const [isLogin, setIsLogin] = useState(true);
@@ -32,6 +32,10 @@ const Auth = ({ isAdminLogin = false }) => {
 
   const [confirmationResult, setConfirmationResult] = useState(null);
   const [smsProvider, setSmsProvider] = useState('MOCK');
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -476,6 +480,8 @@ const Auth = ({ isAdminLogin = false }) => {
       setConfirmNewPassword('');
       setForgotStep(1);
       setConfirmationResult(null);
+      setShowNewPassword(false);
+      setShowConfirmNewPassword(false);
     } catch (err) {
       console.error(err);
       setForgotError(err.response?.data?.msg || "Failed to reset password.");
@@ -607,13 +613,21 @@ const Auth = ({ isAdminLogin = false }) => {
             <div className="relative">
               <Lock className="absolute left-3.5 top-3.5 text-gray-400" size={20} />
               <input 
-                type="password" 
-                className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-medium text-gray-800" 
+                type={showPassword ? "text" : "password"} 
+                className="w-full pl-11 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-medium text-gray-800" 
                 placeholder="••••••••"
                 value={formData.password}
                 onChange={e => setFormData({...formData, password: e.target.value})}
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 border-none bg-transparent cursor-pointer p-1 flex items-center justify-center transition-colors"
+                style={{ zIndex: 10 }}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
             {isLogin && !isAdminLogin && (
               <div className="text-right mt-1.5">
@@ -778,6 +792,8 @@ const Auth = ({ isAdminLogin = false }) => {
                       setForgotSuccess('');
                       setForgotError('');
                       setOtpExpiryTime(0);
+                      setShowNewPassword(false);
+                      setShowConfirmNewPassword(false);
                     }}
                     className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl border-none cursor-pointer transition-colors"
                   >
@@ -856,26 +872,46 @@ const Auth = ({ isAdminLogin = false }) => {
               <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
                 <div className="form-group">
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 ml-1">New Password</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Enter new password"
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-medium text-gray-800"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      required
+                      placeholder="Enter new password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-medium text-gray-800"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 border-none bg-transparent cursor-pointer p-1 flex items-center justify-center transition-colors"
+                      style={{ zIndex: 10 }}
+                    >
+                      {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="form-group">
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 ml-1">Confirm Password</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Confirm new password"
-                    value={confirmNewPassword}
-                    onChange={e => setConfirmNewPassword(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-medium text-gray-800"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmNewPassword ? "text" : "password"}
+                      required
+                      placeholder="Confirm new password"
+                      value={confirmNewPassword}
+                      onChange={e => setConfirmNewPassword(e.target.value)}
+                      className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-500 focus:bg-white outline-none transition-all font-medium text-gray-800"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 border-none bg-transparent cursor-pointer p-1 flex items-center justify-center transition-colors"
+                      style={{ zIndex: 10 }}
+                    >
+                      {showConfirmNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Password Strength Checklist */}
@@ -915,6 +951,8 @@ const Auth = ({ isAdminLogin = false }) => {
                       setNewPassword('');
                       setConfirmNewPassword('');
                       setForgotStep(1);
+                      setShowNewPassword(false);
+                      setShowConfirmNewPassword(false);
                     }}
                     className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl border-none cursor-pointer transition-colors"
                   >
