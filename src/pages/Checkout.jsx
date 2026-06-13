@@ -4,6 +4,8 @@ import { ArrowLeft, CheckCircle, Info, Loader, MapPin, Phone, ShieldCheck, Shopp
 import { ordersAPI, verificationAPI } from "../api";
 import { CompactBadgeRow } from "../components/VerificationBadges";
 import { motion, AnimatePresence } from "motion/react";
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../firebaseConfig';
 
 // UPI app deep link builder (returns standard upi:// scheme to prevent app-specific security blocks on P2P)
 function getUpiAppUrl(app, upiId, name, amount) {
@@ -139,7 +141,6 @@ export default function Checkout() {
     }
   };
 
-  // STEP 2: Buyer submits payment proof uploader
   const handleSubmitProof = async (e) => {
     if (e) e.preventDefault();
     if (!proofFile) {
@@ -160,11 +161,27 @@ export default function Checkout() {
     
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append("screenshot", proofFile);
-      formData.append("utr_number", upiRef);
-      
-      await ordersAPI.submitProof(placedOrderId, formData);
+      let downloadUrl = null;
+      try {
+        const fileExt = proofFile.name.split('.').pop() || 'jpg';
+        const storageRef = ref(storage, `payment_proofs/order_${placedOrderId}_${Date.now()}.${fileExt}`);
+        const snapshot = await uploadBytes(storageRef, proofFile);
+        downloadUrl = await getDownloadURL(snapshot.ref);
+      } catch (storageErr) {
+        console.warn("Firebase Storage upload failed, falling back to local server upload:", storageErr);
+      }
+
+      if (downloadUrl) {
+        await ordersAPI.submitProof(placedOrderId, {
+          screenshot_url: downloadUrl,
+          utr_number: upiRef
+        }, true);
+      } else {
+        const formData = new FormData();
+        formData.append("screenshot", proofFile);
+        formData.append("utr_number", upiRef);
+        await ordersAPI.submitProof(placedOrderId, formData, false);
+      }
       localStorage.removeItem("cart");
       setStep("success");
       setTimeout(() => navigate(`/buyer/track/${placedOrderId}`), 2500);

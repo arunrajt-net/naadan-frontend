@@ -819,10 +819,15 @@ const AdminDashboard = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                                ? 'http://localhost:5000/api'
-                                : 'https://naadan-backend-ebd6e.onrender.com/api';
-                              setSelectedAdminProofUrl(`${API_URL}/uploads/${p.payment_screenshot_url}`);
+                              const url = p.payment_screenshot_url;
+                              if (url.startsWith('http://') || url.startsWith('https://')) {
+                                setSelectedAdminProofUrl(url);
+                              } else {
+                                const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                                  ? 'http://localhost:5000/api'
+                                  : 'https://naadan-backend-ebd6e.onrender.com/api';
+                                setSelectedAdminProofUrl(`${API_URL}/uploads/${url}`);
+                              }
                             }}
                             className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded text-xs font-bold border border-purple-200 cursor-pointer"
                           >
