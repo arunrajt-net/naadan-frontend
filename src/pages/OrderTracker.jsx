@@ -474,7 +474,7 @@ function OrderTracker() {
                     <div className="text-xs font-extrabold text-gray-500 uppercase tracking-wider">Scan this QR Code</div>
                     <div className="bg-white border-2 border-dashed border-green-300 rounded-2xl p-4 inline-block shadow-sm">
                       <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(`upi://pay?pa=${encodeURIComponent(orderDetail.farmer_upi_id || '')}&pn=${encodeURIComponent(orderDetail.farmer_name || 'Farmer')}&am=${orderDetail.total_price}&cu=INR&tn=Naadan%20Farm%20Order`)}`}
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(`upi://pay?pa=${encodeURIComponent(orderDetail.farmer_upi_id || '')}&pn=${encodeURIComponent(orderDetail.farmer_name || 'Farmer')}&am=${orderDetail.total_price}&cu=INR`)}`}
                         alt="UPI QR" 
                         className="w-[200px] h-[200px] block mx-auto" 
                       />
@@ -563,7 +563,7 @@ function OrderTracker() {
                     <div className="text-xs font-extrabold text-gray-500 uppercase tracking-wider">Scan this QR Code</div>
                     <div className="bg-white border-2 border-dashed border-red-300 rounded-2xl p-4 inline-block shadow-sm">
                       <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(`upi://pay?pa=${encodeURIComponent(orderDetail.farmer_upi_id || '')}&pn=${encodeURIComponent(orderDetail.farmer_name || 'Farmer')}&am=${orderDetail.total_price}&cu=INR&tn=Naadan%20Farm%20Order`)}`}
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(`upi://pay?pa=${encodeURIComponent(orderDetail.farmer_upi_id || '')}&pn=${encodeURIComponent(orderDetail.farmer_name || 'Farmer')}&am=${orderDetail.total_price}&cu=INR`)}`}
                         alt="UPI QR" 
                         className="w-[200px] h-[200px] block mx-auto" 
                       />

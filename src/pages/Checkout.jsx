@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "motion/react";
 
 // UPI app deep link builder
 function getUpiAppUrl(app, upiId, name, amount) {
-  const base = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR&tn=${encodeURIComponent("Naadan Farm Order")}`;
+  const base = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR`;
   if (app === "gpay") return "gpay://upi/pay?" + base.split("upi://pay?")[1];
   if (app === "phonepe") return "phonepe://pay?" + base.split("upi://pay?")[1];
   if (app === "paytm") return "paytmmp://pay?" + base.split("upi://pay?")[1];
@@ -105,7 +105,7 @@ export default function Checkout() {
   const farmerName = paymentFarmerDetails?.name || fi.farmer_name || "Farmer";
   const farmerPhone = paymentFarmerDetails?.phone || fi.farmer_phone || "";
   const farmerUpiId = paymentFarmerDetails?.upi_id || fi.farmer_upi_id || "";
-  const upiUrl = `upi://pay?pa=${encodeURIComponent(farmerUpiId)}&pn=${encodeURIComponent(farmerName)}&am=${grandTotal}&cu=INR&tn=Naadan%20Farm%20Order`;
+  const upiUrl = `upi://pay?pa=${encodeURIComponent(farmerUpiId)}&pn=${encodeURIComponent(farmerName)}&am=${grandTotal}&cu=INR`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(upiUrl)}`;
 
   // STEP 1: Place order, get ID, move to payment step
