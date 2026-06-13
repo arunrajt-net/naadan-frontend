@@ -165,6 +165,17 @@ function OrderTracker() {
           const ord = res.data;
           setOrderDetail(ord);
           setBackendStatus(ord.status);
+          
+          const isOutForDelivery = ['Shipped', 'Out For Delivery', 'OutForDelivery'].includes(ord.status);
+          const isArrived = ['Delivered', 'Waiting Customer Confirmation', 'Completed', 'Disputed'].includes(ord.status);
+          if (isArrived) {
+            setOrderStatus('Arrived');
+          } else if (isOutForDelivery) {
+            setOrderStatus('OutForDelivery');
+          } else {
+            setOrderStatus('Packaging');
+          }
+
           const fCoords = [ord.farmer_lat || 10.012, ord.farmer_lng || 76.025];
           const bCoords = [ord.buyer_lat || 10.028, ord.buyer_lng || 76.042];
           setFarmerCoords(fCoords);
@@ -282,12 +293,43 @@ function OrderTracker() {
     }
   };
 
+  const updateStatusToWaitingConfirmation = async () => {
+    try {
+      if (orderId && orderId !== 'latest') {
+        await ordersAPI.updateStatus(orderId, 'Waiting Customer Confirmation');
+        setBackendStatus('Waiting Customer Confirmation');
+      }
+    } catch (e) {
+      console.warn("Failed to set order status to Waiting Customer Confirmation", e);
+    }
+  };
+
   // Animate the rider along the path
   useEffect(() => {
     const totalSteps = routePath.length;
     if (totalSteps === 0) return;
+
+    const isOutForDelivery = ['Shipped', 'Out For Delivery', 'OutForDelivery'].includes(backendStatus);
+    const isArrived = ['Delivered', 'Waiting Customer Confirmation', 'Completed', 'Disputed'].includes(backendStatus);
+    
+    if (isArrived) {
+      setRiderPosition(buyerCoords);
+      setEta(0);
+      setDistanceLeft(0);
+      setOrderStatus('Arrived');
+      return;
+    }
+    
+    if (!isOutForDelivery) {
+      // Keep rider at farmer coordinates
+      setRiderPosition(routePath[0] || farmerCoords);
+      setOrderStatus('Packaging');
+      return;
+    }
+
     setRouteIndex(0);
     setRiderPosition(routePath[0] || farmerCoords);
+    setOrderStatus('OutForDelivery');
     
     const initialDistance = distanceLeft;
     const initialEtaVal = eta;
@@ -302,16 +344,13 @@ function OrderTracker() {
           setEta(nextEta);
           setDistanceLeft(Math.max(0.01, parseFloat((initialDistance - (next * (initialDistance / totalSteps))).toFixed(2))));
           
-          if (next >= 2) {
-            setOrderStatus('OutForDelivery');
-          }
           return next;
         } else {
           setRiderPosition(buyerCoords);
           setEta(0);
           setDistanceLeft(0);
           setOrderStatus('Arrived');
-          // Do NOT auto-complete. Buyer must press confirm button.
+          updateStatusToWaitingConfirmation();
           clearInterval(interval);
           return prev;
         }
@@ -319,17 +358,7 @@ function OrderTracker() {
     }, 1500); // 1.5 seconds per step makes it fast and responsive
 
     return () => clearInterval(interval);
-  }, [deliveryVehicle, routePath, buyerCoords]);
-
-  const updateStatusToCompleted = async () => {
-    try {
-      if (orderId && orderId !== 'latest') {
-        await ordersAPI.updateStatus(orderId, 'Completed');
-      }
-    } catch (e) {
-      console.warn("Failed to set order status to completed", e);
-    }
-  };
+  }, [deliveryVehicle, routePath, buyerCoords, backendStatus]);
 
   const handleRatingSubmit = async (e) => {
     e.preventDefault();
@@ -402,11 +431,16 @@ function OrderTracker() {
     const inactiveClass = "bg-gray-100 text-gray-400";
     const currentStep = getStatusStep();
     
-    if (step === 'Placed') return activeClass; // always active
+    // Step Placed corresponds to 'Order Confirmed' (Accepted/Confirmed status: currentStep >= 2)
+    // Step Packaging corresponds to 'Harvest Packaged' (Packed status: currentStep >= 3)
+    // Step Delivery corresponds to 'Out for Delivery' (Out For Delivery status: currentStep >= 4)
+    // Step Arrived corresponds to 'Delivered' (Waiting Customer Confirmation/Completed/Disputed status: currentStep >= 5)
+
+    if (step === 'Placed') return currentStep >= 2 ? activeClass : inactiveClass;
     if (step === 'Confirmed') return currentStep >= 2 ? activeClass : inactiveClass;
-    if (step === 'Packaging') return (currentStep >= 3 || orderStatus === 'Packaging' || orderStatus === 'OutForDelivery' || orderStatus === 'Arrived') ? activeClass : inactiveClass;
-    if (step === 'Delivery') return (currentStep >= 4 || orderStatus === 'OutForDelivery' || orderStatus === 'Arrived') ? activeClass : inactiveClass;
-    if (step === 'Arrived') return (currentStep >= 5 || orderStatus === 'Arrived') ? activeClass : inactiveClass;
+    if (step === 'Packaging') return currentStep >= 3 ? activeClass : inactiveClass;
+    if (step === 'Delivery') return currentStep >= 4 ? activeClass : inactiveClass;
+    if (step === 'Arrived') return currentStep >= 5 ? activeClass : inactiveClass;
     return inactiveClass;
   };
 
