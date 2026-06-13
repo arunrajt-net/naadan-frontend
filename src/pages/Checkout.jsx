@@ -5,13 +5,9 @@ import { ordersAPI, verificationAPI } from "../api";
 import { CompactBadgeRow } from "../components/VerificationBadges";
 import { motion, AnimatePresence } from "motion/react";
 
-// UPI app deep link builder
+// UPI app deep link builder (returns standard upi:// scheme to prevent app-specific security blocks on P2P)
 function getUpiAppUrl(app, upiId, name, amount) {
-  const base = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR`;
-  if (app === "gpay") return "gpay://upi/pay?" + base.split("upi://pay?")[1];
-  if (app === "phonepe") return "phonepe://pay?" + base.split("upi://pay?")[1];
-  if (app === "paytm") return "paytmmp://pay?" + base.split("upi://pay?")[1];
-  return base; // generic UPI
+  return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR`;
 }
 
 export default function Checkout() {
