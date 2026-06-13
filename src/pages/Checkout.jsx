@@ -7,9 +7,21 @@ import { motion, AnimatePresence } from "motion/react";
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../firebaseConfig';
 
-// UPI app deep link builder (returns standard upi:// scheme to prevent app-specific security blocks on P2P)
+// UPI app deep link builder (uses Android intent URI if on Android to bypass TWA package referrer checks)
 function getUpiAppUrl(app, upiId, name, amount) {
-  return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR`;
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const upiQuery = `pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR`;
+  
+  if (isAndroid) {
+    let pkg = "";
+    if (app === "gpay") pkg = ";package=com.google.android.apps.nbu.paisa.user";
+    else if (app === "phonepe") pkg = ";package=com.phonepe.app";
+    else if (app === "paytm") pkg = ";package=net.one97.paytm";
+    
+    return `intent://${upiQuery}#Intent;scheme=upi${pkg};end`;
+  }
+  
+  return `upi://${upiQuery}`;
 }
 
 export default function Checkout() {
@@ -105,6 +117,12 @@ export default function Checkout() {
   const farmerUpiId = paymentFarmerDetails?.upi_id || fi.farmer_upi_id || "";
   const upiUrl = `upi://pay?pa=${encodeURIComponent(farmerUpiId)}&pn=${encodeURIComponent(farmerName)}&am=${grandTotal}&cu=INR`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(upiUrl)}`;
+  
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const upiQuery = `pay?pa=${encodeURIComponent(farmerUpiId)}&pn=${encodeURIComponent(farmerName)}&am=${grandTotal}&cu=INR`;
+  const mobileUpiUrl = isAndroid 
+    ? `intent://${upiQuery}#Intent;scheme=upi;end`
+    : `upi://${upiQuery}`;
 
   // STEP 1: Place order, get ID, move to payment step
   const handleFormSubmit = async (e) => {
@@ -244,7 +262,7 @@ export default function Checkout() {
             </div>
 
             {/* Generic UPI link */}
-            <a href={upiUrl} className="w-full bg-gray-900 text-white font-bold py-3 rounded-xl text-sm text-center no-underline block hover:bg-black transition-colors">
+            <a href={mobileUpiUrl} className="w-full bg-gray-900 text-white font-bold py-3 rounded-xl text-sm text-center no-underline block hover:bg-black transition-colors">
               Open Any UPI App
             </a>
 
