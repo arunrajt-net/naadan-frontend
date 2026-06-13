@@ -35,6 +35,24 @@ export default function Checkout() {
   const [upiRef, setUpiRef] = useState("");
   const [paymentFarmerDetails, setPaymentFarmerDetails] = useState(null);
   const [proofFile, setProofFile] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [copiedApp, setCopiedApp] = useState(null);
+
+  const handleUpiAppClick = (appLabel, url) => {
+    if (farmerUpiId) {
+      navigator.clipboard.writeText(farmerUpiId)
+        .then(() => {
+          setCopied(true);
+          setCopiedApp(appLabel);
+        })
+        .catch(err => {
+          console.error("Clipboard copy failed", err);
+        });
+    }
+    
+    // Open deep link
+    window.location.href = url;
+  };
 
   useEffect(() => {
     if (placedOrderId && step === "payment") {
@@ -230,6 +248,27 @@ export default function Checkout() {
           </div>
 
           <div className="p-6 space-y-5">
+            {/* Floating Copied Alert */}
+            <AnimatePresence>
+              {copied && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  className="bg-green-700 text-white rounded-2xl p-3.5 shadow-xl text-center space-y-1 border border-green-600">
+                  <p className="text-xs font-black flex items-center justify-center gap-1.5 m-0">
+                    <CheckCircle size={14} className="text-green-200" />
+                    UPI ID Copied to Clipboard!
+                  </p>
+                  <p className="text-[10px] text-green-100 font-semibold leading-normal m-0">
+                    {copiedApp === "General" 
+                      ? "Paste this VPA in your UPI app manually to complete the transfer." 
+                      : `If ${copiedApp} shows a security block, open ${copiedApp} -> Pay UPI ID -> Paste the VPA.`}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* QR Code */}
             <div className="text-center">
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Scan QR Code to Pay</div>
@@ -246,6 +285,38 @@ export default function Checkout() {
               <div className="flex-1 h-px bg-gray-100" />
             </div>
 
+            {/* Copy VPA Box */}
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex items-center justify-between shadow-inner">
+              <div className="min-w-0 pr-2">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Farmer's UPI ID</span>
+                <span className="font-extrabold text-sm text-gray-800 block truncate select-all">{farmerUpiId}</span>
+              </div>
+              <button 
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(farmerUpiId);
+                  setCopied(true);
+                  setCopiedApp("General");
+                  setTimeout(() => { setCopied(false); setCopiedApp(null); }, 4000);
+                }}
+                className="bg-green-100 hover:bg-green-200 text-green-700 font-extrabold px-3 py-2 rounded-xl text-xs border-none cursor-pointer flex items-center gap-1 transition-colors shrink-0">
+                {copied ? "Copied!" : "Copy ID"}
+              </button>
+            </div>
+
+            {/* Instruction Warning Card */}
+            <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center gap-2 text-blue-900 font-extrabold text-xs">
+                <Info size={14} className="text-blue-700 shrink-0" />
+                <span>Google Pay / UPI Security Guide</span>
+              </div>
+              <p className="text-[11px] text-blue-800 font-medium leading-relaxed m-0">
+                If Google Pay or PhonePe shows <strong>"unverified merchant"</strong> or <strong>"no access"</strong> error, this is a standard UPI deep-link restriction.
+                <br /><br />
+                <strong>Easy Fix:</strong> Tap a button below to launch the app (this copies the UPI ID automatically). If GPay displays an error, go back to GPay's home, select <strong>"Pay UPI ID"</strong>, paste the copied ID, and pay <strong>&#8377;{grandTotal}</strong>.
+              </p>
+            </div>
+
             {/* UPI App Buttons */}
             <div className="grid grid-cols-3 gap-3">
               {[
@@ -253,18 +324,22 @@ export default function Checkout() {
                 { id: "phonepe", label: "PhonePe", color: "from-purple-500 to-purple-700" },
                 { id: "paytm", label: "Paytm", color: "from-sky-400 to-blue-500" },
               ].map(app => (
-                <a key={app.id}
-                  href={getUpiAppUrl(app.id, farmerUpiId, farmerName, grandTotal)}
-                  className={`bg-gradient-to-br ${app.color} text-white font-extrabold py-3 rounded-xl text-xs text-center no-underline block shadow-md active:scale-95 transition-transform`}>
+                <button key={app.id}
+                  type="button"
+                  onClick={() => handleUpiAppClick(app.label, getUpiAppUrl(app.id, farmerUpiId, farmerName, grandTotal))}
+                  className={`bg-gradient-to-br ${app.color} text-white font-extrabold py-3 rounded-xl text-xs text-center border-none block shadow-md active:scale-95 transition-transform cursor-pointer`}>
                   {app.label}
-                </a>
+                </button>
               ))}
             </div>
 
             {/* Generic UPI link */}
-            <a href={mobileUpiUrl} className="w-full bg-gray-900 text-white font-bold py-3 rounded-xl text-sm text-center no-underline block hover:bg-black transition-colors">
+            <button 
+              type="button"
+              onClick={() => handleUpiAppClick("UPI app", mobileUpiUrl)}
+              className="w-full bg-gray-900 text-white font-bold py-3 rounded-xl text-sm text-center border-none block hover:bg-black transition-colors cursor-pointer">
               Open Any UPI App
-            </a>
+            </button>
 
             {/* I Have Paid button */}
             <button
