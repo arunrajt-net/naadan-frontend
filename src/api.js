@@ -11,8 +11,8 @@ const _setCache = (key, data) => { _cache[key] = { data, ts: Date.now() }; };
 
 import { auth } from './firebaseConfig';
 
-const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:5000/api'
+export const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.')
+  ? `http://${window.location.hostname}:5000/api`
   : 'https://naadan-backend-ebd6e.onrender.com/api';
 
 const api = axios.create({
@@ -77,6 +77,10 @@ export const ordersAPI = {
   getBuyerOrders: () => api.get('/orders/buyer'),
   updateStatus: (id, status) => api.put(`/orders/${id}/status`, { status }),
   getDetail: (id) => api.get(`/orders/${id}`),
+  submitProof: (id, data, isJson = false) => api.post(`/orders/${id}/submit-proof`, data, isJson ? {} : {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  verifyPayment: (id, data) => api.post(`/orders/${id}/verify-payment`, data),
 };
 
 export const marketAPI = {
@@ -98,6 +102,7 @@ export const adminAPI = {
   rejectFarmer: (userId) => api.post(`/market/verify/reject/${userId}`),
   getDashboardStats: () => api.get('/admin/dashboard-stats'),
   getSmsStats: () => api.get('/admin/sms-stats'),
+  getPayments: () => api.get('/admin/payments'),
 };
 
 export const paymentAPI = {

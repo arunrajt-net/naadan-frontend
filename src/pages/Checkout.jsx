@@ -20,10 +20,11 @@ export default function Checkout() {
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("UPI");
   const [deliveryVehicle, setDeliveryVehicle] = useState("motorcycle");
-  const [step, setStep] = useState("form"); // form | payment | success
+  const [step, setStep] = useState("form"); // form | payment | proof | success
   const [placedOrderId, setPlacedOrderId] = useState(null);
   const [upiRef, setUpiRef] = useState("");
   const [paymentFarmerDetails, setPaymentFarmerDetails] = useState(null);
+  const [proofFile, setProofFile] = useState(null);
 
   useEffect(() => {
     if (placedOrderId && step === "payment") {
@@ -103,7 +104,7 @@ export default function Checkout() {
   const fi = cart[0] || {};
   const farmerName = paymentFarmerDetails?.name || fi.farmer_name || "Farmer";
   const farmerPhone = paymentFarmerDetails?.phone || fi.farmer_phone || "";
-  const farmerUpiId = paymentFarmerDetails?.upi_id || fi.farmer_upi_id || (farmerPhone + "@upi");
+  const farmerUpiId = paymentFarmerDetails?.upi_id || fi.farmer_upi_id || "";
   const upiUrl = `upi://pay?pa=${encodeURIComponent(farmerUpiId)}&pn=${encodeURIComponent(farmerName)}&am=${grandTotal}&cu=INR&tn=Naadan%20Farm%20Order`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(upiUrl)}`;
 
@@ -142,20 +143,37 @@ export default function Checkout() {
     }
   };
 
-  // STEP 2: Buyer has paid, mark order as paid -> WaitingFarmerConfirmation
-  const handleIPaid = async () => {
+  // STEP 2: Buyer submits payment proof uploader
+  const handleSubmitProof = async (e) => {
+    if (e) e.preventDefault();
+    if (!proofFile) {
+      alert("Please upload a payment screenshot.");
+      return;
+    }
+    
+    if (proofFile.size > 5 * 1024 * 1024) {
+      alert("File size exceeds the maximum limit of 5 MB.");
+      return;
+    }
+    
+    const allowed = ["image/jpeg", "image/jpg", "image/png"];
+    if (!allowed.includes(proofFile.type)) {
+      alert("Only JPG, JPEG, and PNG images are allowed.");
+      return;
+    }
+    
     setLoading(true);
     try {
-      for (const item of cart) {
-        // Find the order ID - use placedOrderId for first, others we don't track individually
-        // Best approach: mark all pending orders as paid
-      }
-      await ordersAPI.markPaid(placedOrderId, { upi_ref: upiRef });
+      const formData = new FormData();
+      formData.append("screenshot", proofFile);
+      formData.append("utr_number", upiRef);
+      
+      await ordersAPI.submitProof(placedOrderId, formData);
       localStorage.removeItem("cart");
       setStep("success");
       setTimeout(() => navigate(`/buyer/track/${placedOrderId}`), 2500);
     } catch (err) {
-      alert("Error: " + (err.response?.data?.msg || err.message));
+      alert("Failed to submit proof: " + (err.response?.data?.msg || err.message));
     } finally {
       setLoading(false);
     }
@@ -217,31 +235,13 @@ export default function Checkout() {
               Open Any UPI App
             </a>
 
-            {/* Optional UTR reference */}
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                UTR / Reference Number <span className="text-gray-400 font-medium normal-case">(optional but helpful)</span>
-              </label>
-              <input
-                type="text"
-                value={upiRef}
-                onChange={e => setUpiRef(e.target.value)}
-                className="form-control text-sm"
-                placeholder="e.g. 412345678901 (from your payment app)"
-              />
-              <p className="text-[10px] text-gray-400 font-medium mt-1">
-                <Info size={10} className="inline mr-1" />
-                This helps the farmer match your payment quickly
-              </p>
-            </div>
-
             {/* I Have Paid button */}
             <button
-              onClick={handleIPaid}
-              disabled={loading}
-              className="w-full bg-green-700 hover:bg-green-800 text-white font-extrabold py-4 rounded-xl text-base flex items-center justify-center gap-2 cursor-pointer border-none shadow-lg shadow-green-700/30 disabled:opacity-60 transition-all">
-              {loading ? <Loader size={20} className="animate-spin" /> : <CheckCircle size={20} />}
-              {loading ? "Processing..." : "I Have Paid — Notify Farmer"}
+              type="button"
+              onClick={() => setStep("proof")}
+              className="w-full bg-green-700 hover:bg-green-800 text-white font-extrabold py-4 rounded-xl text-base flex items-center justify-center gap-2 cursor-pointer border-none shadow-lg shadow-green-700/30 transition-all">
+              <CheckCircle size={20} />
+              I Have Paid — Upload Screenshot
             </button>
 
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-800 font-semibold">
@@ -253,6 +253,93 @@ export default function Checkout() {
               &larr; Go back to edit order
             </button>
           </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // ===========================
+  // PROOF UPLOAD STEP UI
+  // ===========================
+  if (step === "proof") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 flex items-center justify-center p-4">
+        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-green-100 p-6 space-y-6">
+          
+          <div className="text-center">
+            <div className="w-16 h-16 mx-auto bg-green-50 rounded-full flex items-center justify-center mb-4">
+              <QrCode className="w-8 h-8 text-green-700" />
+            </div>
+            <h2 className="text-2xl font-black text-gray-900">Upload Payment Proof</h2>
+            <p className="text-sm text-gray-500 font-medium mt-1">Please upload the screenshot of your UPI transfer to confirm your payment of <strong>&#8377;{grandTotal}</strong>.</p>
+          </div>
+
+          <form onSubmit={handleSubmitProof} className="space-y-5">
+            {/* File Upload Area */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">UPI Payment Screenshot *</label>
+              <div className="border-2 border-dashed border-green-300 hover:border-green-500 rounded-2xl p-6 text-center cursor-pointer relative bg-green-50/20 hover:bg-green-50/50 transition-colors">
+                <input
+                  type="file"
+                  accept="image/png, image/jpeg, image/jpg"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert("File size exceeds 5 MB limit.");
+                        return;
+                      }
+                      setProofFile(file);
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  required
+                />
+                <div className="space-y-1">
+                  <span className="inline-block p-3 bg-white rounded-full shadow-sm text-green-700">
+                    <Scan size={24} />
+                  </span>
+                  <p className="text-sm font-bold text-gray-700">
+                    {proofFile ? proofFile.name : "Select or drag screenshot"}
+                  </p>
+                  <p className="text-xs text-gray-400 font-medium">PNG, JPG, or JPEG up to 5 MB</p>
+                </div>
+              </div>
+            </div>
+
+            {/* UTR Input */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">UTR / Transaction ID (Optional)</label>
+              <input
+                type="text"
+                placeholder="12-digit UTR or transaction ID"
+                value={upiRef}
+                onChange={(e) => setUpiRef(e.target.value)}
+                className="form-control"
+              />
+              <p className="text-[10px] text-gray-400 font-medium">Providing the transaction ID helps speed up farmer verification.</p>
+            </div>
+
+            {/* Submit / Action Buttons */}
+            <div className="space-y-3 pt-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-green-700 hover:bg-green-800 text-white font-extrabold py-4 rounded-xl text-base flex items-center justify-center gap-2 cursor-pointer border-none shadow-lg shadow-green-700/30 transition-all disabled:opacity-50">
+                {loading ? <Loader size={20} className="animate-spin" /> : <CheckCircle size={20} />}
+                {loading ? "Submitting..." : "Submit Proof"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStep("payment")}
+                className="w-full bg-transparent border-none text-gray-400 hover:text-gray-600 font-bold text-xs cursor-pointer py-1">
+                &larr; Go back to QR Code / UPI Apps
+              </button>
+            </div>
+          </form>
+
         </motion.div>
       </div>
     );

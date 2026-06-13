@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Award, Bell, Calendar, Check, ChevronDown, ChevronUp, Clock, Eye, Leaf, Loader2, MapPin, Mic, MicOff, Navigation, Package, Phone, Plus, Search, ShieldAlert, ShieldCheck, ShoppingBag, Sparkles, Star, Tag, Trash2, TrendingUp, Truck, User, X, History, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { productsAPI, ordersAPI, authAPI, marketAPI } from '../api';
+import { productsAPI, ordersAPI, authAPI, marketAPI, API_URL } from '../api';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import FarmerVerificationTab from '../components/FarmerVerificationTab';
+
+const getScreenshotUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `${API_URL}/uploads/${url}`;
+};
 import { FarmerBottomNav } from '../components/BottomNav';
 
 // Customer Visibility & Price Advisory Calculator Component
@@ -211,6 +217,15 @@ const FarmerDashboard = () => {
 
   const [upiId, setUpiId] = useState('');
   const [savingUpi, setSavingUpi] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [detectedCoords, setDetectedCoords] = useState(null);
+  const [detectingGps, setDetectingGps] = useState(false);
+  const [savingSetup, setSavingSetup] = useState(false);
+  const [selectedProofUrl, setSelectedProofUrl] = useState(null);
+  const [rejectionOrderId, setRejectionOrderId] = useState(null);
+  const [selectedRejectionReason, setSelectedRejectionReason] = useState('No payment received');
+  const [submittingRejection, setSubmittingRejection] = useState(false);
 
   // Verification Form states
   const [verificationForm, setVerificationForm] = useState({
@@ -364,6 +379,7 @@ const FarmerDashboard = () => {
       if (profileRes.data?.user) {
         const u = profileRes.data.user;
         setUserProfile(u);
+        localStorage.setItem('user', JSON.stringify(u));
         const latVal = u.lat !== null && u.lat !== undefined ? u.lat : 10.0;
         const lngVal = u.lng !== null && u.lng !== undefined ? u.lng : 76.0;
         setFarmLocation({ lat: latVal, lng: lngVal });
@@ -378,7 +394,7 @@ const FarmerDashboard = () => {
           aadhaar_number: u.aadhaar_number || '',
           panchayat_id: u.panchayat_id || ''
         });
-        setUpiId(u.upi_id || (u.phone ? u.phone + '@upi' : ''));
+        setUpiId(u.upi_id || '');
         setLocationPrivacy(u.location_privacy || 'public');
         setPickupInstructions(u.pickup_instructions || '');
         setFarmName(u.farm_name || '');
@@ -461,7 +477,11 @@ const FarmerDashboard = () => {
     try {
       setLoading(true);
       const res = await marketAPI.submitVerification(verificationForm);
-      setUserProfile(prev => ({ ...prev, verification_status: res.data.status }));
+      setUserProfile(prev => {
+        const updated = { ...prev, verification_status: res.data.status };
+        localStorage.setItem('user', JSON.stringify(updated));
+        return updated;
+      });
       alert('Verification details submitted successfully! A Panchayat Market Manager will review them.');
     } catch (err) {
       console.error(err);
@@ -536,6 +556,7 @@ const FarmerDashboard = () => {
         setFarmLocation({ lat: u.lat, lng: u.lng });
         setCustomCoords({ lat: u.lat, lng: u.lng });
         setUserProfile(u);
+        localStorage.setItem('user', JSON.stringify(u));
         alert(`Farm location successfully updated to coordinates (${newLat.toFixed(4)}, ${newLng.toFixed(4)})!`);
         // Refresh history
         const histRes = await authAPI.locationHistory();
@@ -586,30 +607,143 @@ const FarmerDashboard = () => {
   };
 
   const handleSaveUpiId = async () => {
-    if (!upiId.trim()) { alert('Please enter your UPI ID'); return; }
+    const trimmed = upiId.trim();
+    if (!trimmed) { alert('Please enter your UPI ID'); return; }
+    const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+    if (!upiRegex.test(trimmed)) {
+      alert("Invalid UPI ID format. Please use a standard format like username@bankcode (e.g. farmername@okaxis, 9876543210@ybl).");
+      return;
+    }
     setSavingUpi(true);
     try {
-      await authAPI.sync({ upi_id: upiId.trim() });
+      await authAPI.sync({ upi_id: trimmed });
+      setUserProfile(prev => ({ ...prev, upi_id: trimmed }));
       alert('UPI ID saved successfully!');
     } catch (err) {
-      alert('Failed to save: ' + (err.response?.data?.msg || err.message));
+      alert('Failed to save: ' + (err.response?.data?.error || err.response?.data?.msg || err.message));
     } finally {
       setSavingUpi(false);
     }
   };
 
+  const handleListHarvestClick = () => {
+    if (isSetupIncomplete) {
+      setWizardStep(1);
+      setShowSetupModal(true);
+    } else {
+      setShowAdd(!showAdd);
+    }
+  };
+
+  const handleDetectGpsInModal = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+    setDetectingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setGpsAccuracy(accuracy);
+        setDetectedCoords({ lat: latitude, lng: longitude });
+        setDetectingGps(false);
+      },
+      (err) => {
+        if (!window.isSecureContext) {
+          alert("Geolocation requires a secure connection (HTTPS). Local testing on mobile requires special setup or localhost.");
+        } else {
+          alert("Could not access GPS. Please check location permissions.");
+        }
+        setDetectingGps(false);
+      },
+      { enableHighAccuracy: true }
+    );
+  };
+
+  const handleSaveSetupModal = async () => {
+    const trimmedUpi = upiId.trim();
+    const trimmedLandmark = pickupLandmark.trim();
+    const coords = detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0 ? farmLocation : null);
+    
+    if (!trimmedUpi) { alert("UPI ID is required."); return; }
+    const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+    if (!upiRegex.test(trimmedUpi)) {
+      alert("Invalid UPI ID format. E.g. farmername@okaxis, 9876543210@oksbi");
+      return;
+    }
+    if (!trimmedLandmark) { alert("Pickup Landmark is required."); return; }
+    if (!coords) {
+      alert("Please detect your GPS location before saving.");
+      return;
+    }
+
+    const confirmSave = window.confirm(
+      "⚠️ Warning: Please double-check your UPI ID before saving. Incorrect details will cause buyer payments to fail or go to the wrong account. Do you want to proceed?"
+    );
+    if (!confirmSave) return;
+
+    setSavingSetup(true);
+    try {
+      const res = await authAPI.sync({
+        upi_id: trimmedUpi,
+        pickup_landmark: trimmedLandmark,
+        lat: coords.lat,
+        lng: coords.lng,
+        gps_accuracy: gpsAccuracy || 15,
+        change_method: 'Setup Wizard GPS',
+        confirm_active_orders: true
+      });
+      if (res.data?.user) {
+        const u = res.data.user;
+        setUserProfile(u);
+        localStorage.setItem('user', JSON.stringify(u));
+        setFarmLocation({ lat: u.lat, lng: u.lng });
+        setCustomCoords({ lat: u.lat, lng: u.lng });
+        setUpiId(u.upi_id || '');
+        setPickupLandmark(u.pickup_landmark || '');
+        setShowSetupModal(false);
+        setShowAdd(true);
+        alert("Farmer setup complete! You can now list your harvest.");
+      }
+    } catch (err) {
+      alert("Failed to save setup: " + (err.response?.data?.error || err.response?.data?.msg || err.message));
+    } finally {
+      setSavingSetup(false);
+    }
+  };
+
   const handleSavePrivacySettings = async () => {
+    const trimmedUpi = upiId.trim();
+    if (trimmedUpi) {
+      const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+      if (!upiRegex.test(trimmedUpi)) {
+        alert("Invalid UPI ID format. Please use a standard format like username@bankcode (e.g. farmername@okaxis, 9876543210@ybl).");
+        return;
+      }
+      if (trimmedUpi !== userProfile.upi_id) {
+        const confirmSave = window.confirm(
+          "⚠️ Warning: Please double-check your UPI ID before saving. Incorrect details will cause buyer payments to fail or go to the wrong account. Do you want to proceed?"
+        );
+        if (!confirmSave) return;
+      }
+    }
     setSavingPrivacy(true);
     try {
-      await authAPI.sync({
+      const res = await authAPI.sync({
         location_privacy: locationPrivacy,
         pickup_instructions: pickupInstructions,
         farm_name: farmName,
-        pickup_landmark: pickupLandmark
+        pickup_landmark: pickupLandmark,
+        upi_id: trimmedUpi || null
       });
-      alert('Privacy & pickup settings saved successfully!');
+      if (res.data?.user) {
+        const u = res.data.user;
+        setUserProfile(u);
+        localStorage.setItem('user', JSON.stringify(u));
+      }
+      alert('Privacy, pickup & payment settings saved successfully!');
     } catch (err) {
-      alert('Failed to save settings: ' + (err.response?.data?.msg || err.message));
+      alert('Failed to save settings: ' + (err.response?.data?.error || err.response?.data?.msg || err.message));
     } finally {
       setSavingPrivacy(false);
     }
@@ -618,10 +752,31 @@ const FarmerDashboard = () => {
   const handleConfirmPayment = async (orderId) => {
     if (!window.confirm('Confirm you have received the UPI payment? This will mark the order as Confirmed.')) return;
     try {
-      await ordersAPI.farmerConfirm(orderId);
+      await ordersAPI.verifyPayment(orderId, { action: "APPROVE" });
+      alert("Payment verified and order confirmed!");
       fetchData();
     } catch (err) {
       alert('Error: ' + (err.response?.data?.msg || err.message));
+    }
+  };
+
+  const handleRejectPaymentSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!rejectionOrderId) return;
+    setSubmittingRejection(true);
+    try {
+      await ordersAPI.verifyPayment(rejectionOrderId, {
+        action: "REJECT",
+        rejection_reason: selectedRejectionReason
+      });
+      alert("Payment proof rejected.");
+      setRejectionOrderId(null);
+      setSelectedRejectionReason("No payment received");
+      fetchData();
+    } catch (err) {
+      alert("Failed to reject payment: " + (err.response?.data?.msg || err.message));
+    } finally {
+      setSubmittingRejection(false);
     }
   };
 
@@ -710,6 +865,14 @@ const FarmerDashboard = () => {
     const hue = 140 - (index / total) * 60; // 140 is green, 80 is yellow-green
     return `hsl(${hue}, 70%, 45%)`;
   };
+
+  const isSetupIncomplete = !userProfile.upi_id || 
+                            !/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) || 
+                            !userProfile.lat || 
+                            !userProfile.lng || 
+                            (userProfile.lat === 10.0 && userProfile.lng === 76.0) || 
+                            !userProfile.pickup_landmark ||
+                            !userProfile.pickup_landmark.trim();
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 font-sans text-gray-900">
@@ -807,7 +970,7 @@ const FarmerDashboard = () => {
                 <Package className="text-green-700" /> Active Harvest Listings
               </h2>
               <button 
-                onClick={() => setShowAdd(!showAdd)}
+                onClick={handleListHarvestClick}
                 className="btn btn-primary flex items-center justify-center gap-1.5 font-bold py-3 px-6 shadow-md shadow-green-700/10 cursor-pointer"
               >
                 <Plus size={18} /> {showAdd ? 'Close Form' : 'List Harvest'}
@@ -815,7 +978,55 @@ const FarmerDashboard = () => {
             </div>
 
             {/* Add Product Form */}
-            {showAdd && (
+            {showAdd && isSetupIncomplete && (
+              <motion.div 
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-[2rem] p-8 shadow-xl text-center space-y-5"
+              >
+                <div className="w-16 h-16 mx-auto bg-amber-100 rounded-full flex items-center justify-center text-amber-700 shadow-sm">
+                  <ShieldAlert size={32} />
+                </div>
+                <div className="space-y-2 max-w-md mx-auto">
+                  <h3 className="text-2xl font-black text-amber-900">Farmer Setup Incomplete</h3>
+                  <p className="text-sm text-amber-800 font-semibold leading-relaxed">
+                    To list a harvest and receive direct payments, you must first configure your profile settings:
+                  </p>
+                  <ul className="text-xs text-amber-700 font-bold space-y-1.5 text-left bg-white/50 border border-amber-250/30 p-4 rounded-xl inline-block mt-2 mx-auto">
+                    <li className="flex items-center gap-2">
+                      <span className={userProfile.upi_id && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) ? "text-green-600 font-black" : "text-red-500 font-black"}>
+                        {userProfile.upi_id && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) ? "✓" : "✗"}
+                      </span>
+                      <span>Valid UPI ID (e.g. name@okaxis)</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className={userProfile.lat && userProfile.lng && !(userProfile.lat === 10.0 && userProfile.lng === 76.0) ? "text-green-600 font-black" : "text-red-500 font-black"}>
+                        {userProfile.lat && userProfile.lng && !(userProfile.lat === 10.0 && userProfile.lng === 76.0) ? "✓" : "✗"}
+                      </span>
+                      <span>Farm Coordinates (Set on map)</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className={userProfile.pickup_landmark && userProfile.pickup_landmark.trim() ? "text-green-600 font-black" : "text-red-500 font-black"}>
+                        {userProfile.pickup_landmark && userProfile.pickup_landmark.trim() ? "✓" : "✗"}
+                      </span>
+                      <span>Pickup Landmark</span>
+                    </li>
+                  </ul>
+                </div>
+                <div className="pt-2">
+                  <p className="text-xs text-gray-500 font-medium mb-3">Settings can be configured easily through the setup wizard or via settings section.</p>
+                  <button 
+                    type="button"
+                    onClick={() => { setWizardStep(1); setShowSetupModal(true); }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold py-3.5 px-8 rounded-xl text-sm border-none cursor-pointer shadow-md transition-all active:scale-95"
+                  >
+                    Complete Setup Now
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {showAdd && !isSetupIncomplete && (
               <motion.div 
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1424,7 +1635,7 @@ const FarmerDashboard = () => {
                   </p>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
                       Farm Name
@@ -1439,7 +1650,7 @@ const FarmerDashboard = () => {
                   </div>
                   <div>
                     <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
-                      Pickup Landmark
+                      Pickup Landmark *
                     </label>
                     <input
                       type="text"
@@ -1448,6 +1659,26 @@ const FarmerDashboard = () => {
                       className="w-full px-3 py-2 bg-white border border-gray-250 rounded-lg text-gray-800 text-xs font-medium focus:ring-1 focus:ring-green-700 outline-none"
                       placeholder="e.g. Near Panchayat Office"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
+                      UPI ID (Direct Payments) *
+                    </label>
+                    <input
+                      type="text"
+                      value={upiId}
+                      onChange={e => setUpiId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-gray-250 rounded-lg text-gray-800 text-xs font-medium focus:ring-1 focus:ring-green-700 outline-none"
+                      placeholder="e.g. username@bank"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-250/50 rounded-xl text-[10.5px] font-semibold text-amber-800 leading-relaxed flex items-start gap-2 shadow-sm">
+                  <span className="text-amber-600 text-sm mt-0.5">⚠️</span>
+                  <div>
+                    <strong className="text-amber-900 font-black block mb-0.5">Payment Security Warning:</strong>
+                    Ensure this UPI ID matches your bank account exactly. Customers make payments directly to this ID; incorrect info will result in payment failure or lost funds.
                   </div>
                 </div>
 
@@ -1505,6 +1736,43 @@ const FarmerDashboard = () => {
                       {o.buyer_address && <p className="text-gray-650 flex items-start gap-1"><MapPin size={12} className="shrink-0 mt-0.5" /> {o.buyer_address}</p>}
                     </div>
 
+                    {/* Direct UPI Proof Details */}
+                    {o.payment_method === 'UPI' && (o.payment_screenshot_url || o.utr_number) && (
+                      <div className="bg-green-50/50 rounded-xl p-3 border border-green-150 text-xs font-semibold space-y-2 mb-4">
+                        <p className="text-[10px] font-black text-green-800 uppercase tracking-wider">UPI Payment Proof</p>
+                        <div className="flex items-center justify-between gap-4">
+                          {o.payment_screenshot_url ? (
+                            <div className="flex items-center gap-2">
+                              <div 
+                                onClick={() => {
+                                  setSelectedProofUrl(getScreenshotUrl(o.payment_screenshot_url));
+                                }}
+                                className="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity shrink-0 flex items-center justify-center relative group"
+                              >
+                                <img 
+                                  src={getScreenshotUrl(o.payment_screenshot_url)}
+                                  alt="Proof Preview"
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <Eye size={12} className="text-white" />
+                                </div>
+                              </div>
+                              <span className="text-gray-500 font-bold text-[10px]">Click image to inspect proof</span>
+                            </div>
+                          ) : (
+                            <span className="text-amber-600">No screenshot uploaded</span>
+                          )}
+                          {o.utr_number && (
+                            <div className="text-right">
+                              <span className="block text-[8px] text-gray-400 uppercase">UTR / Ref No.</span>
+                              <span className="font-mono text-gray-800 bg-white border border-gray-200 px-1.5 py-0.5 rounded text-[10px] select-all">{o.utr_number}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex justify-between items-center border-t border-gray-100 pt-3">
                       <div>
                         <span className="block text-[8px] text-gray-400 uppercase">Amount</span>
@@ -1514,12 +1782,14 @@ const FarmerDashboard = () => {
                       {(o.status === 'WaitingFarmerConfirmation' || o.status === 'Waiting Farmer Confirmation') && (
                         <div className="flex gap-2 flex-wrap">
                           <button
-                            onClick={() => handleOrderStatus(o.id, 'Rejected')}
+                            type="button"
+                            onClick={() => setRejectionOrderId(o.id)}
                             className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-extrabold rounded-lg border border-red-200 cursor-pointer transition-colors flex items-center gap-1"
                           >
                             <X size={12} /> Reject
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleConfirmPayment(o.id)}
                             className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer transition-colors flex items-center gap-1.5 shadow-sm"
                           >
@@ -1655,6 +1925,43 @@ const FarmerDashboard = () => {
                     {o.buyer_address && <p className="text-gray-650 flex items-start gap-1"><MapPin size={12} className="shrink-0 mt-0.5" /> {o.buyer_address}</p>}
                   </div>
 
+                  {/* Direct UPI Proof Details */}
+                  {o.payment_method === 'UPI' && (o.payment_screenshot_url || o.utr_number) && (
+                    <div className="bg-green-50/50 rounded-xl p-3 border border-green-150 text-xs font-semibold space-y-2 mb-4">
+                      <p className="text-[10px] font-black text-green-800 uppercase tracking-wider">UPI Payment Proof</p>
+                      <div className="flex items-center justify-between gap-4">
+                        {o.payment_screenshot_url ? (
+                          <div className="flex items-center gap-2">
+                            <div 
+                              onClick={() => {
+                                setSelectedProofUrl(getScreenshotUrl(o.payment_screenshot_url));
+                              }}
+                              className="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity shrink-0 flex items-center justify-center relative group"
+                            >
+                              <img 
+                                src={getScreenshotUrl(o.payment_screenshot_url)}
+                                alt="Proof Preview"
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <Eye size={12} className="text-white" />
+                              </div>
+                            </div>
+                            <span className="text-gray-500 font-bold text-[10px]">Click image to inspect proof</span>
+                          </div>
+                        ) : (
+                          <span className="text-amber-600">No screenshot uploaded</span>
+                        )}
+                        {o.utr_number && (
+                          <div className="text-right">
+                            <span className="block text-[8px] text-gray-400 uppercase">UTR / Ref No.</span>
+                            <span className="font-mono text-gray-800 bg-white border border-gray-200 px-1.5 py-0.5 rounded text-[10px] select-all">{o.utr_number}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex justify-between items-center border-t border-gray-100 pt-3">
                     <div>
                       <span className="block text-[8px] text-gray-400 uppercase">Amount</span>
@@ -1665,7 +1972,7 @@ const FarmerDashboard = () => {
                       <div className="flex gap-2 flex-wrap">
                         <button
                           type="button"
-                          onClick={() => handleOrderStatus(o.id, 'Rejected')}
+                          onClick={() => setRejectionOrderId(o.id)}
                           className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-extrabold rounded-lg border border-red-200 cursor-pointer transition-colors flex items-center gap-1"
                         >
                           <X size={12} /> Reject
@@ -2147,6 +2454,388 @@ const FarmerDashboard = () => {
           </div>
         </div>
       )}
+      {/* Screenshot Zoom Modal */}
+      <AnimatePresence>
+        {selectedProofUrl && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+            <div className="absolute inset-0" onClick={() => setSelectedProofUrl(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative max-w-4xl max-h-[90vh] bg-white rounded-3xl overflow-hidden shadow-2xl z-10 border border-gray-200 animate-fade-in"
+            >
+              <button 
+                type="button"
+                onClick={() => setSelectedProofUrl(null)}
+                className="absolute top-4 right-4 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 border-none cursor-pointer z-20 flex items-center justify-center transition-colors"
+              >
+                <X size={20} />
+              </button>
+              <div className="p-4 bg-gray-50 border-b border-gray-150 flex items-center justify-between">
+                <span className="font-extrabold text-sm text-gray-800">UPI Payment Screenshot Inspection</span>
+              </div>
+              <div className="overflow-auto p-2 flex items-center justify-center bg-gray-900 max-h-[75vh]">
+                <img 
+                  src={selectedProofUrl} 
+                  alt="High resolution proof" 
+                  className="max-w-full max-h-[70vh] object-contain"
+                />
+              </div>
+              <div className="p-4 bg-white border-t border-gray-100 text-center">
+                <button 
+                  type="button"
+                  onClick={() => setSelectedProofUrl(null)}
+                  className="bg-gray-900 hover:bg-black text-white font-extrabold px-6 py-2 rounded-xl text-xs border-none cursor-pointer"
+                >
+                  Close Preview
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment Rejection Reason Modal */}
+      <AnimatePresence>
+        {rejectionOrderId && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+            <div className="absolute inset-0" onClick={() => setRejectionOrderId(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2rem] p-6 w-full max-w-sm border border-gray-100 shadow-2xl relative z-10 space-y-5"
+            >
+              <div className="text-center">
+                <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <AlertTriangle size={24} />
+                </div>
+                <h3 className="font-extrabold text-xl text-gray-900">Reject Payment Proof</h3>
+                <p className="text-gray-500 font-semibold text-xs mt-1">Please select the reason for rejecting the customer's payment proof.</p>
+              </div>
+
+              <form onSubmit={handleRejectPaymentSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">Rejection Reason</label>
+                  <select
+                    value={selectedRejectionReason}
+                    onChange={(e) => setSelectedRejectionReason(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-red-500 outline-none font-semibold text-gray-700 cursor-pointer"
+                  >
+                    <option value="No payment received">No payment received</option>
+                    <option value="Wrong amount paid">Wrong amount paid</option>
+                    <option value="Invalid screenshot">Invalid screenshot</option>
+                    <option value="UTR mismatch">UTR mismatch</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setRejectionOrderId(null)}
+                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors border-none cursor-pointer text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingRejection}
+                    className="flex-[2] py-3 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-xl shadow-md border-none cursor-pointer flex items-center justify-center gap-1 text-xs"
+                  >
+                    {submittingRejection ? 'Rejecting...' : 'Confirm Reject'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Complete Your Farmer Setup Modal */}
+      <AnimatePresence>
+        {showSetupModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+            <div className="absolute inset-0" onClick={() => setShowSetupModal(false)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white rounded-[2.5rem] p-8 w-full max-w-lg border border-gray-100 shadow-2xl relative z-10 space-y-6 max-h-[95vh] overflow-y-auto"
+            >
+              <div className="text-center">
+                <div className="w-16 h-16 bg-green-50 text-green-700 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
+                  <ShieldAlert size={30} />
+                </div>
+                <h3 className="font-black text-2xl text-gray-900">Complete Your Farmer Setup</h3>
+                <p className="text-gray-500 font-semibold text-xs mt-1">
+                  Configure your profile settings in 3 easy steps to start listing harvests and receiving direct payments.
+                </p>
+              </div>
+
+              {/* Wizard Step Progress Stepper with Labels */}
+              <div className="flex items-center justify-between bg-gray-50 border border-gray-150 p-4 rounded-2xl">
+                {/* Step 1 Label */}
+                <div 
+                  onClick={() => setWizardStep(1)}
+                  className="flex flex-col items-center flex-1 cursor-pointer transition-all"
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-all ${
+                    wizardStep === 1 
+                      ? 'bg-green-700 text-white shadow-md ring-4 ring-green-100'
+                      : (upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId))
+                        ? 'bg-green-100 text-green-700 border border-green-300'
+                        : 'bg-gray-105 text-gray-500 border border-gray-200'
+                  }`}>
+                    {upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? '✓' : '1'}
+                  </div>
+                  <span className={`text-[10px] font-black mt-1.5 transition-colors ${wizardStep === 1 ? 'text-green-800' : 'text-gray-500'}`}>
+                    1. UPI Setup
+                  </span>
+                </div>
+
+                <div className={`flex-1 h-[2px] mx-1 transition-colors ${upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? 'bg-green-500' : 'bg-gray-200'}`} />
+
+                {/* Step 2 Label */}
+                <div 
+                  onClick={() => setWizardStep(2)}
+                  className="flex flex-col items-center flex-1 cursor-pointer transition-all"
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-all ${
+                    wizardStep === 2 
+                      ? 'bg-green-700 text-white shadow-md ring-4 ring-green-100'
+                      : (pickupLandmark && pickupLandmark.trim())
+                        ? 'bg-green-100 text-green-700 border border-green-300'
+                        : 'bg-gray-105 text-gray-500 border border-gray-200'
+                  }`}>
+                    {pickupLandmark && pickupLandmark.trim() ? '✓' : '2'}
+                  </div>
+                  <span className={`text-[10px] font-black mt-1.5 transition-colors ${wizardStep === 2 ? 'text-green-800' : 'text-gray-500'}`}>
+                    2. Landmark
+                  </span>
+                </div>
+
+                <div className={`flex-1 h-[2px] mx-1 transition-colors ${pickupLandmark && pickupLandmark.trim() ? 'bg-green-500' : 'bg-gray-200'}`} />
+
+                {/* Step 3 Label */}
+                <div 
+                  onClick={() => setWizardStep(3)}
+                  className="flex flex-col items-center flex-1 cursor-pointer transition-all"
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-all ${
+                    wizardStep === 3 
+                      ? 'bg-green-700 text-white shadow-md ring-4 ring-green-100'
+                      : (detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0))
+                        ? 'bg-green-100 text-green-700 border border-green-300'
+                        : 'bg-gray-105 text-gray-500 border border-gray-200'
+                  }`}>
+                    {detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0) ? '✓' : '3'}
+                  </div>
+                  <span className={`text-[10px] font-black mt-1.5 transition-colors ${wizardStep === 3 ? 'text-green-800' : 'text-gray-500'}`}>
+                    3. Farm GPS
+                  </span>
+                </div>
+              </div>
+
+              {/* Checklist Status Summary */}
+              <div className="bg-gray-50 border border-gray-150 p-4 rounded-2xl text-[11px] font-semibold text-gray-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    {upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? (
+                      <span className="text-green-600 font-black">✅ UPI ID Configured</span>
+                    ) : (
+                      <span className="text-red-500 font-black">❌ UPI ID Missing or Invalid</span>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-gray-400 font-mono">{upiId || 'Not Configured'}</span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    {pickupLandmark && pickupLandmark.trim() ? (
+                      <span className="text-green-600 font-black">✅ Pickup Landmark Configured</span>
+                    ) : (
+                      <span className="text-red-500 font-black">❌ Pickup Landmark Missing</span>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-gray-400 truncate max-w-[150px]">{pickupLandmark || 'Not Configured'}</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    {detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0) ? (
+                      <span className="text-green-600 font-black">✅ Farm Location Configured</span>
+                    ) : (
+                      <span className="text-red-500 font-black">❌ Farm Location Missing</span>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-gray-400 font-mono">
+                    {detectedCoords 
+                      ? `${detectedCoords.lat.toFixed(4)}, ${detectedCoords.lng.toFixed(4)}` 
+                      : (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0)
+                        ? `${farmLocation.lat.toFixed(4)}, ${farmLocation.lng.toFixed(4)}`
+                        : 'Not Configured'
+                    }
+                  </span>
+                </div>
+              </div>
+
+              {/* Form Steps */}
+              <div className="space-y-5">
+                {/* Step 1: UPI ID */}
+                {wizardStep === 1 && (
+                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                      <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
+                        Step 1 of 3
+                      </span>
+                      <span className="text-xs font-black text-gray-700">Payment Setup</span>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
+                        UPI ID (for Direct Payments) *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. farmername@okaxis, 9876543210@paytm"
+                        value={upiId}
+                        onChange={(e) => setUpiId(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-600 outline-none text-xs font-semibold text-gray-700"
+                      />
+                      <span className="text-[9px] text-gray-400 mt-1 block ml-1 leading-normal">
+                        This UPI ID will receive customer payments directly. Enter format: username@bankcode
+                      </span>
+                      <div className="mt-3.5 p-3 bg-amber-50 border border-amber-250/40 rounded-xl flex items-start gap-2 text-[10px] text-amber-800 font-semibold leading-relaxed">
+                        <span className="text-amber-600 text-sm">⚠️</span>
+                        <div>
+                          <strong className="text-amber-900 font-black block mb-0.5">Setup Warning:</strong>
+                          Double-check your UPI ID before saving. Buyer payments go directly to this ID. Incorrect details will cause payments to fail or go to the wrong account, and cannot be recovered.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 2: Pickup Landmark */}
+                {wizardStep === 2 && (
+                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                      <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
+                        Step 2 of 3
+                      </span>
+                      <span className="text-xs font-black text-gray-700">Pickup Logistics</span>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
+                        Pickup Landmark *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Near Grama Panchayat Office Ranni"
+                        value={pickupLandmark}
+                        onChange={(e) => setPickupLandmark(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-600 outline-none text-xs font-semibold text-gray-700"
+                      />
+                      <span className="text-[9px] text-gray-400 mt-1 block ml-1 leading-normal">
+                        Provide a well-known local landmark for buyers to find your farm easily.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 3: Farm Geolocation */}
+                {wizardStep === 3 && (
+                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                      <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
+                        Step 3 of 3
+                      </span>
+                      <span className="text-xs font-black text-gray-700">Farm Geolocation</span>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
+                        Farm Location Coordinates (GPS) *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleDetectGpsInModal}
+                        disabled={detectingGps}
+                        className="w-full py-2.5 px-4 bg-green-700 hover:bg-green-800 text-white font-extrabold rounded-xl border-none cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm text-xs disabled:opacity-60"
+                      >
+                        <MapPin size={14} className={detectingGps ? "animate-bounce" : ""} />
+                        {detectingGps ? 'Detecting Location...' : 'Detect GPS Location'}
+                      </button>
+                      <span className="text-[9px] text-gray-400 mt-1.5 block ml-1 leading-normal">
+                        {detectedCoords 
+                          ? `✅ Detected Coords: ${detectedCoords.lat.toFixed(6)}, ${detectedCoords.lng.toFixed(6)}`
+                          : (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0)
+                            ? `Using existing saved location: ${farmLocation.lat.toFixed(6)}, ${farmLocation.lng.toFixed(6)}`
+                            : '⚠️ No coordinates selected. Click Detect GPS to pinpoint your farm.'
+                        }
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                {wizardStep > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setWizardStep(wizardStep - 1)}
+                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold rounded-xl transition-colors border-none cursor-pointer text-xs"
+                  >
+                    Back
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowSetupModal(false)}
+                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold rounded-xl transition-colors border-none cursor-pointer text-xs"
+                  >
+                    Cancel
+                  </button>
+                )}
+
+                {wizardStep < 3 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (wizardStep === 1) {
+                        const trimmedUpi = upiId.trim();
+                        if (!trimmedUpi) { alert("UPI ID is required."); return; }
+                        const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+                        if (!upiRegex.test(trimmedUpi)) {
+                          alert("Invalid UPI ID format. E.g. farmername@okaxis, 9876543210@oksbi");
+                          return;
+                        }
+                      } else if (wizardStep === 2) {
+                        if (!pickupLandmark.trim()) { alert("Pickup Landmark is required."); return; }
+                      }
+                      setWizardStep(wizardStep + 1);
+                    }}
+                    className="flex-[2] py-3 bg-green-700 hover:bg-green-800 text-white font-extrabold rounded-xl shadow-md border-none cursor-pointer flex items-center justify-center gap-1 text-xs"
+                  >
+                    Next Step
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSaveSetupModal}
+                    disabled={savingSetup}
+                    className="flex-[2] py-3 bg-green-700 hover:bg-green-800 text-white font-extrabold rounded-xl shadow-md border-none cursor-pointer flex items-center justify-center gap-1 text-xs disabled:opacity-60"
+                  >
+                    {savingSetup ? 'Saving...' : 'Save Setup & Open Form'}
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <FarmerBottomNav orderCount={orders.filter(o => o.status === 'Pending' || o.status === 'PENDING').length} />
     </div>
   );

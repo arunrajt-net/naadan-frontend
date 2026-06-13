@@ -6,7 +6,8 @@ import { AlertCircle, CheckCircle2, Clock, Home, MapPin, MessageSquare, Navigati
 import { motion, AnimatePresence } from 'motion/react';
 import L from 'leaflet';
 import { ordersAPI, marketAPI } from '../api';
-
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../firebaseConfig';
 // Leaflet marker configurations
 const buyerIcon = L.divIcon({
   className: 'bg-transparent border-none',
@@ -72,6 +73,67 @@ function OrderTracker() {
   const [riderPosition, setRiderPosition] = useState([10.012, 76.025]);
   const [routeIndex, setRouteIndex] = useState(0);
   const [orderDetail, setOrderDetail] = useState(null);
+  const [trackerProofFile, setTrackerProofFile] = useState(null);
+  const [trackerUpiRef, setTrackerUpiRef] = useState("");
+  const [submittingProof, setSubmittingProof] = useState(false);
+
+  const handleTrackerSubmitProof = async (e) => {
+    if (e) e.preventDefault();
+    if (!trackerProofFile) {
+      alert("Please upload a payment screenshot.");
+      return;
+    }
+    
+    if (trackerProofFile.size > 5 * 1024 * 1024) {
+      alert("File size exceeds the maximum limit of 5 MB.");
+      return;
+    }
+    
+    const allowed = ["image/jpeg", "image/jpg", "image/png"];
+    if (!allowed.includes(trackerProofFile.type)) {
+      alert("Only JPG, JPEG, and PNG images are allowed.");
+      return;
+    }
+    
+    setSubmittingProof(true);
+    try {
+      let downloadUrl = null;
+      try {
+        const fileExt = trackerProofFile.name.split('.').pop() || 'jpg';
+        const storageRef = ref(storage, `payment_proofs/order_${orderId}_${Date.now()}.${fileExt}`);
+        const snapshot = await uploadBytes(storageRef, trackerProofFile);
+        downloadUrl = await getDownloadURL(snapshot.ref);
+      } catch (storageErr) {
+        console.warn("Firebase Storage upload failed, falling back to local server upload:", storageErr);
+      }
+
+      if (downloadUrl) {
+        await ordersAPI.submitProof(orderId, {
+          screenshot_url: downloadUrl,
+          utr_number: trackerUpiRef
+        }, true);
+      } else {
+        const formData = new FormData();
+        formData.append("screenshot", trackerProofFile);
+        formData.append("utr_number", trackerUpiRef);
+        await ordersAPI.submitProof(orderId, formData, false);
+      }
+      alert("Proof submitted successfully! The farmer will verify it.");
+      
+      // Reload order details
+      const res = await ordersAPI.getDetail(orderId);
+      if (res.data) {
+        setOrderDetail(res.data);
+        setBackendStatus(res.data.status);
+      }
+      setTrackerProofFile(null);
+      setTrackerUpiRef("");
+    } catch (err) {
+      alert("Failed to submit proof: " + (err.response?.data?.msg || err.message));
+    } finally {
+      setSubmittingProof(false);
+    }
+  };
 
   // Rating Modal states
   const [showRatingModal, setShowRatingModal] = useState(false);
@@ -390,52 +452,208 @@ function OrderTracker() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         
         {/* === STATUS BANNERS === */}
-        {backendStatus === 'WaitingFarmerConfirmation' && (
-          <div className="mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 flex items-start gap-4">
-            <div className="text-3xl shrink-0">&#128336;</div>
-            <div className="flex-1">
-              <h3 className="font-black text-amber-900 text-base">Waiting for Farmer Confirmation</h3>
-              <p className="text-amber-800 text-sm font-semibold mt-1">Your UPI payment has been sent. The farmer is checking their GPay/PhonePe notification.</p>
-              <p className="text-amber-700 text-xs font-medium mt-1">This usually takes a few minutes. Your order will be confirmed once the farmer verifies the payment.</p>
-              <button onClick={handleRefresh} disabled={refreshing}
-                className="mt-3 text-xs font-black text-amber-700 border border-amber-300 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg cursor-pointer border-solid inline-flex items-center gap-1.5">
-                <RefreshCw size={12} className={`refreshing ? "animate-spin" : ""`} />
-                {refreshing ? "Refreshing..." : "Check for Update"}
-              </button>
-            </div>
+        {/* UPI Payment Form or Pending Verification Card */}
+        {orderDetail?.payment_method === 'UPI' && (
+          <div className="col-span-1 lg:col-span-3">
+            {orderDetail.payment_status === 'PENDING_PAYMENT' && (
+              <div className="mb-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-[2rem] p-6 shadow-xl space-y-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-green-200/50 pb-5">
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-green-700 uppercase tracking-widest bg-green-100/50 border border-green-200 px-3 py-1 rounded-full inline-block">Direct UPI Payment Required</div>
+                    <h2 className="text-2xl font-black text-gray-900 mt-2">Pay Directly to Farmer: {orderDetail.farmer_name}</h2>
+                    <p className="text-sm text-gray-600 font-semibold">Please scan the QR code below or open your preferred UPI app to pay <strong>&#8377;{orderDetail.total_price}</strong>.</p>
+                  </div>
+                  <div className="bg-white/60 backdrop-blur rounded-2xl py-3 px-6 border border-green-200 text-center md:text-right shrink-0">
+                    <span className="text-xs font-bold text-gray-500 block uppercase">Amount Due</span>
+                    <span className="text-3xl font-black text-green-700">&#8377;{orderDetail.total_price}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                  <div className="text-center space-y-3">
+                    <div className="text-xs font-extrabold text-gray-500 uppercase tracking-wider">Scan this QR Code</div>
+                    <div className="bg-white border-2 border-dashed border-green-300 rounded-2xl p-4 inline-block shadow-sm">
+                      <img 
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(`upi://pay?pa=${encodeURIComponent(orderDetail.farmer_upi_id || '')}&pn=${encodeURIComponent(orderDetail.farmer_name || 'Farmer')}&am=${orderDetail.total_price}&cu=INR&tn=Naadan%20Farm%20Order`)}`}
+                        alt="UPI QR" 
+                        className="w-[200px] h-[200px] block mx-auto" 
+                      />
+                    </div>
+                    <div className="text-[10px] text-gray-450 font-bold">UPI ID: {orderDetail.farmer_upi_id || 'Not Configured'}</div>
+                  </div>
+
+                  <form onSubmit={handleTrackerSubmitProof} className="space-y-5 bg-white/40 p-6 rounded-2xl border border-green-200/40">
+                    <h3 className="text-lg font-bold text-gray-800">Submit Payment Proof</h3>
+                    
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">Payment Screenshot *</label>
+                      <div className="border-2 border-dashed border-green-300 hover:border-green-500 rounded-xl p-5 text-center cursor-pointer relative bg-white hover:bg-green-50/20 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/jpg"
+                          onChange={(e) => setTrackerProofFile(e.target.files[0])}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          required
+                        />
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-gray-750">
+                            {trackerProofFile ? trackerProofFile.name : "Select payment screenshot"}
+                          </p>
+                          <p className="text-[10px] text-gray-400 font-medium">PNG, JPG, or JPEG up to 5 MB</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">UTR / Transaction ID (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="12-digit UTR or transaction ID"
+                        value={trackerUpiRef}
+                        onChange={(e) => setTrackerUpiRef(e.target.value)}
+                        className="form-control"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submittingProof}
+                      className="w-full bg-green-700 hover:bg-green-800 text-white font-extrabold py-3.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer border-none shadow-md shadow-green-700/20 transition-all disabled:opacity-50">
+                      {submittingProof ? <Loader size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                      {submittingProof ? "Submitting..." : "Submit Payment Proof"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {orderDetail.payment_status === 'PAYMENT_SUBMITTED' && (
+              <div className="mb-6 bg-amber-50 border-2 border-amber-300 rounded-[2rem] p-6 shadow-md flex items-start gap-4">
+                <div className="text-4xl shrink-0">&#128336;</div>
+                <div className="flex-1 space-y-1">
+                  <h3 className="font-black text-amber-900 text-lg">Waiting for Farmer Confirmation</h3>
+                  <p className="text-amber-800 text-sm font-semibold">Your payment proof has been submitted successfully. The farmer is checking their GPay/PhonePe notification.</p>
+                  <p className="text-amber-700 text-xs font-medium">This usually takes a few minutes. Your order will be confirmed once the farmer verifies the payment.</p>
+                  {orderDetail.utr_number && (
+                    <p className="text-xs text-amber-850 font-bold mt-2">Submitted UTR: <span className="bg-amber-100 border border-amber-200 px-2 py-0.5 rounded font-mono text-[11px]">{orderDetail.utr_number}</span></p>
+                  )}
+                  <button onClick={handleRefresh} disabled={refreshing}
+                    className="mt-3 text-xs font-black text-amber-700 border border-amber-300 bg-amber-100 hover:bg-amber-200 px-3.5 py-2 rounded-xl cursor-pointer border-solid inline-flex items-center gap-1.5 transition-all">
+                    <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+                    {refreshing ? "Refreshing..." : "Check for Update"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {orderDetail.payment_status === 'PAYMENT_REJECTED' && (
+              <div className="mb-6 bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-300 rounded-[2rem] p-6 shadow-xl space-y-6">
+                <div className="flex items-start gap-4 border-b border-red-200/50 pb-5">
+                  <div className="text-4xl shrink-0">&#10060;</div>
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-red-755 uppercase tracking-widest bg-red-100 border border-red-200 px-3.5 py-1 rounded-full inline-block">Payment Verification Failed</div>
+                    <h3 className="font-black text-red-900 text-lg mt-2">The farmer rejected the payment proof.</h3>
+                    <p className="text-red-800 text-sm font-bold mt-1">Reason: <span className="underline">{orderDetail.payment_rejection_reason || "Invalid screenshot / UTR mismatch"}</span></p>
+                    <p className="text-red-700 text-xs font-semibold">Please review the details, scan the QR code, and submit a corrected screenshot and transaction ID.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                  <div className="text-center space-y-3">
+                    <div className="text-xs font-extrabold text-gray-500 uppercase tracking-wider">Scan this QR Code</div>
+                    <div className="bg-white border-2 border-dashed border-red-300 rounded-2xl p-4 inline-block shadow-sm">
+                      <img 
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=15&data=${encodeURIComponent(`upi://pay?pa=${encodeURIComponent(orderDetail.farmer_upi_id || '')}&pn=${encodeURIComponent(orderDetail.farmer_name || 'Farmer')}&am=${orderDetail.total_price}&cu=INR&tn=Naadan%20Farm%20Order`)}`}
+                        alt="UPI QR" 
+                        className="w-[200px] h-[200px] block mx-auto" 
+                      />
+                    </div>
+                    <div className="text-[10px] text-gray-450 font-bold">UPI ID: {orderDetail.farmer_upi_id || 'Not Configured'}</div>
+                  </div>
+
+                  <form onSubmit={handleTrackerSubmitProof} className="space-y-5 bg-white/40 p-6 rounded-2xl border border-red-200/40">
+                    <h3 className="text-lg font-bold text-gray-800">Submit Corrected Proof</h3>
+                    
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">Corrected Screenshot *</label>
+                      <div className="border-2 border-dashed border-red-300 hover:border-red-500 rounded-xl p-5 text-center cursor-pointer relative bg-white hover:bg-red-50/20 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/jpg"
+                          onChange={(e) => setTrackerProofFile(e.target.files[0])}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          required
+                        />
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-gray-750">
+                            {trackerProofFile ? trackerProofFile.name : "Select corrected screenshot"}
+                          </p>
+                          <p className="text-[10px] text-gray-400 font-medium">PNG, JPG, or JPEG up to 5 MB</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">UTR / Transaction ID (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="12-digit UTR or transaction ID"
+                        value={trackerUpiRef}
+                        onChange={(e) => setTrackerUpiRef(e.target.value)}
+                        className="form-control"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submittingProof}
+                      className="w-full bg-red-600 hover:bg-red-750 text-white font-extrabold py-3.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer border-none shadow-md shadow-red-600/20 transition-all disabled:opacity-50">
+                      {submittingProof ? <Loader size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                      {submittingProof ? "Submitting..." : "Submit Corrected Proof"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
-        {backendStatus === 'Confirmed' && (
-          <div className="mb-6 bg-green-50 border-2 border-green-400 rounded-2xl p-5 flex items-start gap-4">
-            <div className="text-3xl shrink-0">&#9989;</div>
-            <div>
-              <h3 className="font-black text-green-900 text-base">Payment Confirmed by Farmer!</h3>
-              <p className="text-green-800 text-sm font-semibold mt-1">The farmer has verified your payment. Your order is being prepared for pickup/delivery.</p>
-            </div>
-          </div>
-        )}
-        {backendStatus === 'Rejected' && (
-          <div className="mb-6 bg-red-50 border-2 border-red-300 rounded-2xl p-5 flex items-start gap-4">
-            <div className="text-3xl shrink-0">&#10060;</div>
-            <div>
-              <h3 className="font-black text-red-900 text-base">Order Rejected</h3>
-              <p className="text-red-800 text-sm font-semibold mt-1">The farmer could not fulfill this order. Please contact the farmer for clarification.</p>
-              <button onClick={() => window.history.back()} className="mt-3 text-xs font-black text-red-700 border border-red-300 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg cursor-pointer border-solid inline-flex items-center gap-1.5">
-                &#8592; Go Back
-              </button>
-            </div>
-          </div>
-        )}
-        {backendStatus === 'Cancelled' && (
-          <div className="mb-6 bg-gray-50 border-2 border-gray-300 rounded-2xl p-5 flex items-start gap-4">
-            <div className="text-3xl shrink-0">🚫</div>
-            <div>
-              <h3 className="font-black text-gray-900 text-base">Order Cancelled</h3>
-              <p className="text-gray-800 text-sm font-semibold mt-1">This order was cancelled. Any reserved stock has been released.</p>
-              <button onClick={() => window.history.back()} className="mt-3 text-xs font-black text-gray-700 border border-gray-300 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg cursor-pointer border-solid inline-flex items-center gap-1.5">
-                &#8592; Go Back
-              </button>
-            </div>
+
+        {/* Regular Status Banners (COD or non-verification states) */}
+        {(!orderDetail?.payment_method || orderDetail?.payment_method !== 'UPI' || orderDetail?.payment_status === 'PAYMENT_CONFIRMED') && (
+          <div className="col-span-1 lg:col-span-3">
+            {(backendStatus === 'Confirmed' || backendStatus === 'Accepted' || backendStatus === 'ACCEPTED') && (
+              <div className="mb-6 bg-green-50 border-2 border-green-400 rounded-2xl p-5 flex items-start gap-4">
+                <div className="text-3xl shrink-0">&#9989;</div>
+                <div>
+                  <h3 className="font-black text-green-900 text-base">Order Confirmed by Farmer!</h3>
+                  <p className="text-green-800 text-sm font-semibold mt-1">Your order is being prepared for pickup/delivery.</p>
+                </div>
+              </div>
+            )}
+            {backendStatus === 'Rejected' && (
+              <div className="mb-6 bg-red-50 border-2 border-red-300 rounded-2xl p-5 flex items-start gap-4">
+                <div className="text-3xl shrink-0">&#10060;</div>
+                <div>
+                  <h3 className="font-black text-red-900 text-base">Order Rejected</h3>
+                  <p className="text-red-800 text-sm font-semibold mt-1">The farmer could not fulfill this order. Please contact the farmer for clarification.</p>
+                  <button onClick={() => window.history.back()} className="mt-3 text-xs font-black text-red-700 border border-red-300 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg cursor-pointer border-solid inline-flex items-center gap-1.5">
+                    &#8592; Go Back
+                  </button>
+                </div>
+              </div>
+            )}
+            {backendStatus === 'Cancelled' && (
+              <div className="mb-6 bg-gray-50 border-2 border-gray-300 rounded-2xl p-5 flex items-start gap-4">
+                <div className="text-3xl shrink-0">🚫</div>
+                <div>
+                  <h3 className="font-black text-gray-900 text-base">Order Cancelled</h3>
+                  <p className="text-gray-800 text-sm font-semibold mt-1">This order was cancelled. Any reserved stock has been released.</p>
+                  <button onClick={() => window.history.back()} className="mt-3 text-xs font-black text-gray-700 border border-gray-300 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg cursor-pointer border-solid inline-flex items-center gap-1.5">
+                    &#8592; Go Back
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

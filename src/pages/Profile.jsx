@@ -7,13 +7,33 @@ import { CompactBadgeRow } from '../components/VerificationBadges';
 
 const Profile = () => {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
   const activeRole = localStorage.getItem('activeRole') || (user.is_farmer ? 'farmer' : 'buyer');
   
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name || '');
   const [phone, setPhone] = useState(user.phone || '');
   const [saved, setSaved] = useState(false);
+
+  React.useEffect(() => {
+    const fetchLatestProfile = async () => {
+      try {
+        const res = await authAPI.sync({});
+        if (res.data?.user) {
+          const u = res.data.user;
+          localStorage.setItem('user', JSON.stringify(u));
+          setUser(u);
+          if (!editing) {
+            setName(u.name || '');
+            setPhone(u.phone || '');
+          }
+        }
+      } catch (err) {
+        console.error("Failed to sync latest profile details:", err);
+      }
+    };
+    fetchLatestProfile();
+  }, [editing]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -30,13 +50,11 @@ const Profile = () => {
     try {
       const res = await authAPI.sync({ name, phone });
       const u = res.data.user;
-      // Complete profile save simplification (Condition 11)
       localStorage.setItem('user', JSON.stringify(u));
+      setUser(u);
       setSaved(true);
       setEditing(false);
       setTimeout(() => setSaved(false), 2000);
-      // Force page update
-      window.location.reload();
     } catch (err) {
       alert("Profile update failed. Reason: " + (err.response?.data?.error || err.response?.data?.msg || err.message));
     }

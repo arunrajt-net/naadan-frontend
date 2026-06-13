@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminAPI, marketAPI } from '../api';
-import { ArrowLeft, CheckCircle, Edit2, Loader2, MapPin, Plus, Search, ShieldAlert, ShieldCheck, Sliders, Trash2, XCircle, User } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Edit2, Loader2, MapPin, Plus, Search, ShieldAlert, ShieldCheck, Sliders, Trash2, XCircle, User, X } from 'lucide-react';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -31,6 +31,9 @@ const AdminDashboard = () => {
   const [loadingStats, setLoadingStats] = useState(false);
   const [smsStats, setSmsStats] = useState(null);
   const [loadingSms, setLoadingSms] = useState(false);
+  const [payments, setPayments] = useState([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [selectedAdminProofUrl, setSelectedAdminProofUrl] = useState(null);
 
   // General State
   const [errorMsg, setErrorMsg] = useState('');
@@ -48,6 +51,25 @@ const AdminDashboard = () => {
       setLoadingSms(false);
     }
   };
+
+  const fetchPayments = async () => {
+    try {
+      setLoadingPayments(true);
+      const res = await adminAPI.getPayments();
+      setPayments(res.data);
+    } catch (err) {
+      console.error("Failed to fetch payments:", err);
+      showError("Failed to fetch payment audits.");
+    } finally {
+      setLoadingPayments(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'payments' && isAdmin) {
+      fetchPayments();
+    }
+  }, [activeTab, isAdmin]);
 
   // Check auth and role
   useEffect(() => {
@@ -290,6 +312,12 @@ const AdminDashboard = () => {
             className={`px-6 py-2.5 rounded-xl font-bold cursor-pointer transition-all border-none ${activeTab === 'verifications' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
           >
             Farmer Verifications {verifications.length > 0 && <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full ml-1 animate-pulse">{verifications.length}</span>}
+          </button>
+          <button 
+            onClick={() => setActiveTab('payments')}
+            className={`px-6 py-2.5 rounded-xl font-bold cursor-pointer transition-all border-none ${activeTab === 'payments' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            Payment Audits
           </button>
         </div>
       </div>
@@ -723,6 +751,137 @@ const AdminDashboard = () => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB CONTENT: PAYMENTS (AUDITS) */}
+      {activeTab === 'payments' && (
+        <div className="bg-white border border-gray-150 rounded-[2rem] p-8 shadow-sm space-y-6 animate-fade-in">
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2">
+              <ShieldCheck size={28} className="text-purple-600" /> Direct UPI Payment Audit Ledger
+            </h2>
+            <button onClick={fetchPayments} className="btn bg-gray-50 hover:bg-gray-100 text-gray-705 font-bold border-none py-2 px-4 rounded-xl cursor-pointer">
+              Refresh Ledger
+            </button>
+          </div>
+          
+          {loadingPayments ? (
+            <div className="flex justify-center items-center py-20">
+              <Loader2 size={32} className="text-purple-600 animate-spin" />
+            </div>
+          ) : payments.length === 0 ? (
+            <div className="text-center py-20 text-gray-400 font-bold">
+              No payment transaction logs found.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-150 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    <th className="py-3 px-4">Order ID</th>
+                    <th className="py-3 px-4">Buyer</th>
+                    <th className="py-3 px-4">Farmer</th>
+                    <th className="py-3 px-4">Amount</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">UTR Number</th>
+                    <th className="py-3 px-4">Proof</th>
+                    <th className="py-3 px-4">Verified By</th>
+                    <th className="py-3 px-4">Rejection Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 font-semibold text-gray-800 text-sm">
+                  {payments.map((p) => (
+                    <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-gray-900">#{p.id}</td>
+                      <td className="py-3.5 px-4 text-xs">
+                        <p className="font-bold">{p.buyer_name}</p>
+                        <p className="text-[10px] text-gray-400">ID: {p.buyer_id}</p>
+                      </td>
+                      <td className="py-3.5 px-4 text-xs">
+                        <p className="font-bold">{p.farmer_name}</p>
+                        <p className="text-[10px] text-gray-400">ID: {p.farmer_id}</p>
+                      </td>
+                      <td className="py-3.5 px-4 text-purple-700 font-extrabold">&#8377;{p.total_price}</td>
+                      <td className="py-3.5 px-4">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                          p.payment_status === 'PAYMENT_CONFIRMED' ? 'bg-green-100 text-green-800' :
+                          p.payment_status === 'PAYMENT_SUBMITTED' ? 'bg-amber-100 text-amber-800' :
+                          p.payment_status === 'PAYMENT_REJECTED' ? 'bg-red-100 text-red-800' :
+                          'bg-gray-100 text-gray-650'
+                        }`}>
+                          {p.payment_status || 'PENDING'}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-xs text-gray-650">{p.utr_number || 'N/A'}</td>
+                      <td className="py-3.5 px-4">
+                        {p.payment_screenshot_url ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                                ? 'http://localhost:5000/api'
+                                : 'https://naadan-backend-ebd6e.onrender.com/api';
+                              setSelectedAdminProofUrl(`${API_URL}/uploads/${p.payment_screenshot_url}`);
+                            }}
+                            className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded text-xs font-bold border border-purple-200 cursor-pointer"
+                          >
+                            Inspect
+                          </button>
+                        ) : (
+                          <span className="text-gray-400 text-xs">None</span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-xs font-semibold text-gray-600">
+                        {p.payment_verified_by ? (
+                          <div>
+                            <p className="font-bold">{p.payment_verified_by}</p>
+                            {p.payment_verified_at && <p className="text-[9px] text-gray-400">{new Date(p.payment_verified_at).toLocaleDateString()}</p>}
+                          </div>
+                        ) : 'Unverified'}
+                      </td>
+                      <td className="py-3.5 px-4 text-xs font-semibold text-red-650">{p.payment_rejection_reason || 'N/A'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Admin Screenshot Zoom Modal */}
+      {selectedAdminProofUrl && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-fade-in">
+          <div className="absolute inset-0" onClick={() => setSelectedAdminProofUrl(null)} />
+          <div className="relative max-w-4xl max-h-[90vh] bg-white rounded-3xl overflow-hidden shadow-2xl z-10 border border-gray-200">
+            <button 
+              type="button"
+              onClick={() => setSelectedAdminProofUrl(null)}
+              className="absolute top-4 right-4 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 border-none cursor-pointer z-20 flex items-center justify-center transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <div className="p-4 bg-gray-50 border-b border-gray-150 flex items-center justify-between">
+              <span className="font-extrabold text-sm text-gray-800">Direct UPI Payment Audit Screenshot</span>
+            </div>
+            <div className="overflow-auto p-2 flex items-center justify-center bg-gray-900 max-h-[75vh]">
+              <img 
+                src={selectedAdminProofUrl} 
+                alt="Admin High resolution proof" 
+                className="max-w-full max-h-[70vh] object-contain"
+              />
+            </div>
+            <div className="p-4 bg-white border-t border-gray-100 text-center">
+              <button 
+                type="button"
+                onClick={() => setSelectedAdminProofUrl(null)}
+                className="bg-gray-900 hover:bg-black text-white font-extrabold px-6 py-2 rounded-xl text-xs border-none cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
