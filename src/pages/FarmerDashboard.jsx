@@ -3056,6 +3056,15 @@ const FarmerDashboard = () => {
                       </span>
                       <span className="text-xs font-black text-gray-700">Choose Payment Method</span>
                     </div>
+                    {hasActiveOrders && userProfile.payment_methods && (
+                      <div className="p-3 bg-amber-50 border border-amber-250/50 rounded-xl text-[10.5px] font-bold text-amber-800 leading-normal flex items-start gap-2 shadow-sm mb-3">
+                        <span className="text-amber-600 text-sm mt-0.5">⚠️</span>
+                        <div>
+                          You cannot change your payment method while active orders are in progress.
+                          <span className="block font-normal text-[10px] mt-0.5 text-amber-700">Please complete or cancel existing orders first.</span>
+                        </div>
+                      </div>
+                    )}
                     <p className="text-[11px] text-gray-500 font-semibold leading-relaxed">
                       Which payment method would you like to accept from buyers? You must choose one to continue.
                     </p>
@@ -3079,33 +3088,39 @@ const FarmerDashboard = () => {
                           title: 'Both UPI and Cash on Delivery',
                           desc: 'Let buyers choose their preferred payment method. Requires a valid UPI ID.'
                         },
-                      ].map(opt => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setPaymentMethods(opt.value)}
-                          className={`w-full p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
-                            paymentMethods === opt.value
-                              ? 'bg-green-50 border-green-600 shadow-md'
-                              : 'bg-white border-gray-200 hover:border-green-300 hover:bg-green-50/30'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <span className="text-xl mt-0.5">{opt.icon}</span>
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between">
-                                <span className={`text-xs font-black ${paymentMethods === opt.value ? 'text-green-800' : 'text-gray-800'}`}>{opt.title}</span>
-                                {paymentMethods === opt.value && (
-                                  <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center">
-                                    <Check size={11} className="text-white" />
-                                  </div>
-                                )}
+                      ].map(opt => {
+                        const isChangeBlocked = hasActiveOrders && userProfile.payment_methods && userProfile.payment_methods !== opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            disabled={isChangeBlocked}
+                            onClick={() => setPaymentMethods(opt.value)}
+                            className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+                              isChangeBlocked ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                            } ${
+                              paymentMethods === opt.value
+                                ? 'bg-green-50 border-green-600 shadow-md'
+                                : 'bg-white border-gray-200 hover:border-green-300 hover:bg-green-50/30'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span className="text-xl mt-0.5">{opt.icon}</span>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-xs font-black ${paymentMethods === opt.value ? 'text-green-800' : 'text-gray-800'}`}>{opt.title}</span>
+                                  {paymentMethods === opt.value && (
+                                    <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center">
+                                      <Check size={11} className="text-white" />
+                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-gray-500 font-medium mt-0.5 leading-relaxed">{opt.desc}</p>
                               </div>
-                              <p className="text-[10px] text-gray-500 font-medium mt-0.5 leading-relaxed">{opt.desc}</p>
                             </div>
-                          </div>
-                        </button>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
                     {!paymentMethods && (
                       <p className="text-[10px] text-center text-amber-700 font-bold bg-amber-50 border border-amber-200 rounded-xl py-2">⚠️ You must choose one option to continue.</p>
