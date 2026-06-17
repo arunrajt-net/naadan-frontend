@@ -216,6 +216,7 @@ const FarmerDashboard = () => {
   const [loadingPerformance, setLoadingPerformance] = useState(false);
 
   const [upiId, setUpiId] = useState('');
+  const [paymentMethods, setPaymentMethods] = useState(null);
   const [savingUpi, setSavingUpi] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
@@ -226,6 +227,7 @@ const FarmerDashboard = () => {
   const [rejectionOrderId, setRejectionOrderId] = useState(null);
   const [selectedRejectionReason, setSelectedRejectionReason] = useState('No payment received');
   const [submittingRejection, setSubmittingRejection] = useState(false);
+  const [actionLoading, setActionLoading] = useState({});
 
   // Verification Form states
   const [verificationForm, setVerificationForm] = useState({
@@ -395,6 +397,7 @@ const FarmerDashboard = () => {
           panchayat_id: u.panchayat_id || ''
         });
         setUpiId(u.upi_id || '');
+        setPaymentMethods(u.payment_methods || null);
         setLocationPrivacy(u.location_privacy || 'public');
         setPickupInstructions(u.pickup_instructions || '');
         setFarmName(u.farm_name || '');
@@ -596,13 +599,20 @@ const FarmerDashboard = () => {
     }
   };
 
-  const handleOrderStatus = async (orderId, newStatus) => {
+  const handleOrderStatus = async (orderId, newStatus, actionType = null) => {
+    if (actionType) {
+      setActionLoading(prev => ({ ...prev, [orderId]: { ...prev[orderId], [actionType]: true } }));
+    }
     try {
       await ordersAPI.updateStatus(orderId, newStatus);
       fetchData();
     } catch (err) {
       console.error('Failed to update status', err);
       alert('Error: ' + (err.response?.data?.msg || err.message));
+    } finally {
+      if (actionType) {
+        setActionLoading(prev => ({ ...prev, [orderId]: { ...prev[orderId], [actionType]: false } }));
+      }
     }
   };
 
@@ -661,31 +671,38 @@ const FarmerDashboard = () => {
   };
 
   const handleSaveSetupModal = async () => {
-    const trimmedUpi = upiId.trim();
+    if (!paymentMethods) { alert("Please select a payment method."); return; }
     const trimmedLandmark = pickupLandmark.trim();
     const coords = detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0 ? farmLocation : null);
-    
-    if (!trimmedUpi) { alert("UPI ID is required."); return; }
-    const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
-    if (!upiRegex.test(trimmedUpi)) {
-      alert("Invalid UPI ID format. E.g. farmername@okaxis, 9876543210@oksbi");
-      return;
+    const requiresUpi = paymentMethods === 'UPI_ONLY' || paymentMethods === 'BOTH';
+
+    let finalUpi = null;
+    if (requiresUpi) {
+      const trimmedUpi = upiId.trim();
+      if (!trimmedUpi) { alert("UPI ID is required for your selected payment method."); return; }
+      const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+      if (!upiRegex.test(trimmedUpi)) {
+        alert("Invalid UPI ID format. E.g. farmername@okaxis, 9876543210@oksbi");
+        return;
+      }
+      const confirmSave = window.confirm(
+        "⚠️ Warning: Please double-check your UPI ID before saving. Incorrect details will cause buyer payments to fail or go to the wrong account. Do you want to proceed?"
+      );
+      if (!confirmSave) return;
+      finalUpi = trimmedUpi;
     }
+
     if (!trimmedLandmark) { alert("Pickup Landmark is required."); return; }
     if (!coords) {
       alert("Please detect your GPS location before saving.");
       return;
     }
 
-    const confirmSave = window.confirm(
-      "⚠️ Warning: Please double-check your UPI ID before saving. Incorrect details will cause buyer payments to fail or go to the wrong account. Do you want to proceed?"
-    );
-    if (!confirmSave) return;
-
     setSavingSetup(true);
     try {
       const res = await authAPI.sync({
-        upi_id: trimmedUpi,
+        payment_methods: paymentMethods,
+        upi_id: finalUpi,
         pickup_landmark: trimmedLandmark,
         lat: coords.lat,
         lng: coords.lng,
@@ -701,6 +718,7 @@ const FarmerDashboard = () => {
         setCustomCoords({ lat: u.lat, lng: u.lng });
         setUpiId(u.upi_id || '');
         setPickupLandmark(u.pickup_landmark || '');
+        setPaymentMethods(u.payment_methods || null);
         setShowSetupModal(false);
         setShowAdd(true);
         alert("Farmer setup complete! You can now list your harvest.");
@@ -734,12 +752,14 @@ const FarmerDashboard = () => {
         pickup_instructions: pickupInstructions,
         farm_name: farmName,
         pickup_landmark: pickupLandmark,
-        upi_id: trimmedUpi || null
+        upi_id: trimmedUpi || null,
+        payment_methods: paymentMethods
       });
       if (res.data?.user) {
         const u = res.data.user;
         setUserProfile(u);
         localStorage.setItem('user', JSON.stringify(u));
+        setPaymentMethods(u.payment_methods || null);
       }
       alert('Privacy, pickup & payment settings saved successfully!');
     } catch (err) {
@@ -835,7 +855,10 @@ const FarmerDashboard = () => {
     if (status === 'Shipped' || status === 'Out For Delivery') return 'bg-blue-100 text-blue-800 border border-blue-200';
     if (status === 'Delivered' || status === 'Waiting Customer Confirmation') return 'bg-teal-100 text-teal-800 border border-teal-200';
     if (status === 'Completed') return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
-    if (status === 'Rejected') return 'bg-red-100 text-red-800 border border-red-200';
+    if (status === 'Rejected' || status === 'COD_REJECTED') return 'bg-red-100 text-red-800 border border-red-200';
+    if (status === 'COD_EXPIRED') return 'bg-red-100 text-red-800 border border-red-200';
+    if (status === 'COD_PENDING') return 'bg-amber-100 text-amber-800 border border-amber-300';
+    if (status === 'COD_ACCEPTED') return 'bg-green-100 text-green-800 border border-green-200';
     if (status === 'Disputed') return 'bg-red-100 text-red-800 border border-red-250 animate-pulse';
     return 'bg-gray-100 text-gray-600 border border-gray-200';
   };
@@ -855,6 +878,10 @@ const FarmerDashboard = () => {
       'Waiting Customer Confirmation': 'Waiting Customer Confirmation',
       'Completed': 'Completed',
       'Rejected': 'Rejected',
+      'COD_PENDING': 'Awaiting Your Acceptance',
+      'COD_ACCEPTED': 'Accepted (COD)',
+      'COD_REJECTED': 'Rejected',
+      'COD_EXPIRED': 'Expired',
       'Disputed': 'Disputed (Admin Review)',
     };
     return labels[status] || status;
@@ -866,13 +893,27 @@ const FarmerDashboard = () => {
     return `hsl(${hue}, 70%, 45%)`;
   };
 
-  const isSetupIncomplete = !userProfile.upi_id || 
-                            !/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) || 
+  // Setup is incomplete if: payment method not chosen, OR (UPI needed but no valid UPI ID), OR no location, OR no landmark
+  const needsUpi = paymentMethods === 'UPI_ONLY' || paymentMethods === 'BOTH';
+  const upiValid = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id || '');
+  const isSetupIncomplete = !paymentMethods ||
+                            (needsUpi && (!userProfile.upi_id || !upiValid)) || 
                             !userProfile.lat || 
                             !userProfile.lng || 
                             (userProfile.lat === 10.0 && userProfile.lng === 76.0) || 
                             !userProfile.pickup_landmark ||
                             !userProfile.pickup_landmark.trim();
+
+  const activeOrderStatuses = [
+    'Pending Payment', 'Pending', 'PENDING',
+    'PAYMENT_SUBMITTED', 'PAYMENT_CONFIRMED',
+    'Waiting Farmer Confirmation', 'Waiting Farmer Confirmation',
+    'Accepted', 'Packed', 'Out For Delivery', 'Waiting Customer Confirmation',
+    'COD_PENDING', 'COD_ACCEPTED', 'Disputed'
+  ];
+  const hasActiveOrders = orders.some(o => activeOrderStatuses.includes(o.status));
+
+  const pendingCodOrders = orders.filter(o => o.status === 'COD_PENDING');
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 font-sans text-gray-900">
@@ -961,7 +1002,66 @@ const FarmerDashboard = () => {
 
       {/* TAB CONTENT: HARVESTS */}
       {activeTab === 'harvests' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <>
+          {pendingCodOrders.length > 0 && (
+            <div className="mb-8 bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 rounded-[2rem] p-6 shadow-lg space-y-4 max-w-4xl mx-auto animate-fade-in">
+              <div className="flex items-start gap-4">
+                <div className="bg-red-100 text-red-700 w-12 h-12 rounded-full flex items-center justify-center text-xl shrink-0 animate-bounce">
+                  🔔
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-black text-red-900">
+                    {pendingCodOrders.length} New COD Order{pendingCodOrders.length > 1 ? 's' : ''} Waiting
+                  </h3>
+                  <p className="text-sm font-bold text-red-800 mt-1">
+                    Payment Method: Cash on Delivery
+                  </p>
+                  <p className="text-xs text-red-755 font-semibold mt-1 leading-relaxed">
+                    ⚠️ No online payment will be received.<br />
+                    The customer will pay in cash during pickup or delivery.<br />
+                    Please review and accept/reject this order.
+                  </p>
+                </div>
+              </div>
+              <div className="divide-y divide-red-200/50 max-h-[300px] overflow-y-auto pr-1">
+                {pendingCodOrders.map(o => (
+                  <div key={o.id} className="py-3 flex flex-wrap justify-between items-center gap-3 first:pt-0 last:pb-0">
+                    <div>
+                      <span className="font-extrabold text-xs text-red-900 block">Order #{o.id} - {o.product_name}</span>
+                      <span className="text-[11px] text-red-750 font-medium block">Qty: {o.quantity_ordered} unit(s) | Total: &#8377;{o.total_price} | Buyer: {o.buyer_name}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={actionLoading[o.id]?.reject}
+                        onClick={() => handleOrderStatus(o.id, 'COD_REJECTED', 'reject')}
+                        className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-black rounded-lg border border-red-300 cursor-pointer transition-all flex items-center justify-center min-w-[70px] disabled:opacity-50"
+                      >
+                        {actionLoading[o.id]?.reject ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          "Reject"
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionLoading[o.id]?.accept}
+                        onClick={() => handleOrderStatus(o.id, 'COD_ACCEPTED', 'accept')}
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-black rounded-lg border-none cursor-pointer transition-all flex items-center justify-center min-w-[70px] disabled:opacity-50 shadow-sm shadow-green-700/20"
+                      >
+                        {actionLoading[o.id]?.accept ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          "Accept"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* Left Column: Harvest Listing & Add Form */}
           <div className="lg:col-span-2 space-y-8">
@@ -989,16 +1089,30 @@ const FarmerDashboard = () => {
                 </div>
                 <div className="space-y-2 max-w-md mx-auto">
                   <h3 className="text-2xl font-black text-amber-900">Farmer Setup Incomplete</h3>
+                  {needsUpi && (!userProfile.upi_id || !/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id)) && (
+                    <div className="bg-red-50 border border-red-200 text-red-800 text-[11px] font-extrabold py-2.5 px-4 rounded-xl flex items-start gap-2 mb-4 text-left shadow-sm">
+                      <span>⚠️</span>
+                      <span>UPI payment is enabled. Please configure a valid UPI ID before listing products.</span>
+                    </div>
+                  )}
                   <p className="text-sm text-amber-800 font-semibold leading-relaxed">
                     To list a harvest and receive direct payments, you must first configure your profile settings:
                   </p>
                   <ul className="text-xs text-amber-700 font-bold space-y-1.5 text-left bg-white/50 border border-amber-250/30 p-4 rounded-xl inline-block mt-2 mx-auto">
                     <li className="flex items-center gap-2">
-                      <span className={userProfile.upi_id && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) ? "text-green-600 font-black" : "text-red-500 font-black"}>
-                        {userProfile.upi_id && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) ? "✓" : "✗"}
+                      <span className={paymentMethods ? "text-green-600 font-black" : "text-red-500 font-black"}>
+                        {paymentMethods ? "✓" : "✗"}
                       </span>
-                      <span>Valid UPI ID (e.g. name@okaxis)</span>
+                      <span>Payment Method Selected</span>
                     </li>
+                    {needsUpi && (
+                      <li className="flex items-center gap-2">
+                        <span className={userProfile.upi_id && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) ? "text-green-600 font-black" : "text-red-500 font-black"}>
+                          {userProfile.upi_id && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(userProfile.upi_id) ? "✓" : "✗"}
+                        </span>
+                        <span>Valid UPI ID (e.g. name@okaxis)</span>
+                      </li>
+                    )}
                     <li className="flex items-center gap-2">
                       <span className={userProfile.lat && userProfile.lng && !(userProfile.lat === 10.0 && userProfile.lng === 76.0) ? "text-green-600 font-black" : "text-red-500 font-black"}>
                         {userProfile.lat && userProfile.lng && !(userProfile.lat === 10.0 && userProfile.lng === 76.0) ? "✓" : "✗"}
@@ -1635,6 +1749,50 @@ const FarmerDashboard = () => {
                   </p>
                 </div>
                 
+                {/* Payment Method Selection */}
+                <div className="border border-gray-150 rounded-2xl p-4 bg-gray-50 space-y-3">
+                  <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                    💳 Payment Method
+                  </label>
+                  {hasActiveOrders && (
+                    <div className="p-3 bg-amber-50 border border-amber-250/50 rounded-xl text-[10.5px] font-bold text-amber-800 leading-normal flex items-start gap-2 shadow-sm">
+                      <span className="text-amber-600 text-sm mt-0.5">⚠️</span>
+                      <div>
+                        You cannot change your payment method while active orders are in progress.
+                        <span className="block font-normal text-[10px] mt-0.5 text-amber-700">Please complete or cancel existing orders first.</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'UPI_ONLY', label: '💳 UPI Only', desc: 'Receive direct UPI transfers' },
+                      { value: 'COD_ONLY', label: '💵 Cash Only', desc: 'Cash on delivery/pickup' },
+                      { value: 'BOTH',     label: '💳+💵 Both',  desc: 'UPI and Cash accepted' },
+                    ].map(opt => {
+                      const isSelected = paymentMethods === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          disabled={hasActiveOrders}
+                          onClick={() => setPaymentMethods(opt.value)}
+                          className={`p-2.5 rounded-xl border text-center font-extrabold text-[10px] cursor-pointer transition-all leading-tight ${
+                            isSelected
+                              ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-55'
+                          } ${hasActiveOrders ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          <div>{opt.label}</div>
+                          <div className={`font-normal text-[9px] mt-0.5 ${isSelected ? 'text-green-100' : 'text-gray-400'}`}>{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {!paymentMethods && (
+                    <p className="text-[10px] text-amber-700 font-bold">⚠️ You must select a payment method to list products.</p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
@@ -1660,27 +1818,31 @@ const FarmerDashboard = () => {
                       placeholder="e.g. Near Panchayat Office"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
-                      UPI ID (Direct Payments) *
-                    </label>
-                    <input
-                      type="text"
-                      value={upiId}
-                      onChange={e => setUpiId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-gray-250 rounded-lg text-gray-800 text-xs font-medium focus:ring-1 focus:ring-green-700 outline-none"
-                      placeholder="e.g. username@bank"
-                    />
-                  </div>
+                  {(paymentMethods === 'UPI_ONLY' || paymentMethods === 'BOTH') && (
+                    <div>
+                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
+                        UPI ID (Direct Payments) *
+                      </label>
+                      <input
+                        type="text"
+                        value={upiId}
+                        onChange={e => setUpiId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-250 rounded-lg text-gray-800 text-xs font-medium focus:ring-1 focus:ring-green-700 outline-none"
+                        placeholder="e.g. username@bank"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                <div className="p-3 bg-amber-50 border border-amber-250/50 rounded-xl text-[10.5px] font-semibold text-amber-800 leading-relaxed flex items-start gap-2 shadow-sm">
-                  <span className="text-amber-600 text-sm mt-0.5">⚠️</span>
-                  <div>
-                    <strong className="text-amber-900 font-black block mb-0.5">Payment Security Warning:</strong>
-                    Ensure this UPI ID matches your bank account exactly. Customers make payments directly to this ID; incorrect info will result in payment failure or lost funds.
+                {(paymentMethods === 'UPI_ONLY' || paymentMethods === 'BOTH') && (
+                  <div className="p-3 bg-amber-50 border border-amber-250/50 rounded-xl text-[10.5px] font-semibold text-amber-800 leading-relaxed flex items-start gap-2 shadow-sm">
+                    <span className="text-amber-600 text-sm mt-0.5">⚠️</span>
+                    <div>
+                      <strong className="text-amber-900 font-black block mb-0.5">Payment Security Warning:</strong>
+                      Ensure this UPI ID matches your bank account exactly. Customers make payments directly to this ID; incorrect info will result in payment failure or lost funds.
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div>
                   <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
@@ -1722,7 +1884,18 @@ const FarmerDashboard = () => {
                 orders.map(o => (
                   <div key={o.id} className="bg-white border border-gray-150 rounded-[2rem] p-6 shadow-sm">
                     <div className="flex justify-between items-center mb-3">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Order #{o.id}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Order #{o.id}</span>
+                        {o.payment_method === 'COD' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-green-100 text-green-800 border border-green-200">
+                            🟢 COD
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                            🔵 UPI
+                          </span>
+                        )}
+                      </div>
                       <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${getStatusColor(o.status)}`}>
                         {getStatusLabel(o.status)}
                       </span>
@@ -1778,6 +1951,58 @@ const FarmerDashboard = () => {
                         <span className="block text-[8px] text-gray-400 uppercase">Amount</span>
                         <span className="text-lg font-black text-green-700">&#8377;{o.total_price}</span>
                       </div>
+                      {/* COD Pending Actions */}
+                      {o.status === 'COD_PENDING' && (
+                        <div className="flex gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            disabled={actionLoading[o.id]?.reject}
+                            onClick={() => handleOrderStatus(o.id, 'COD_REJECTED', 'reject')}
+                            className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-extrabold rounded-lg border border-red-200 cursor-pointer transition-colors flex items-center gap-1 disabled:opacity-50"
+                          >
+                            {actionLoading[o.id]?.reject ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <>
+                                <X size={12} /> Reject
+                              </>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={actionLoading[o.id]?.accept}
+                            onClick={() => handleOrderStatus(o.id, 'COD_ACCEPTED', 'accept')}
+                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                          >
+                            {actionLoading[o.id]?.accept ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <>
+                                <Check size={12} /> Accept Order
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* COD Accepted Actions */}
+                      {o.status === 'COD_ACCEPTED' && (
+                        <button
+                          type="button"
+                          disabled={actionLoading[o.id]?.complete}
+                          onClick={() => { if(window.confirm('Confirm that cash payment has been collected for this order?')) handleOrderStatus(o.id, 'Completed', 'complete'); }}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                        >
+                          {actionLoading[o.id]?.complete ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <>
+                              <Check size={12} /> Payment Collected
+                            </>
+                          )}
+                        </button>
+                      )}
+
                       {/* Waiting Farmer Confirmation */}
                       {(o.status === 'WaitingFarmerConfirmation' || o.status === 'Waiting Farmer Confirmation') && (
                         <div className="flex gap-2 flex-wrap">
@@ -1799,8 +2024,9 @@ const FarmerDashboard = () => {
                       )}
 
                       {/* Accepted: farmer marks as Packed */}
-                      {(o.status === 'Accepted' || o.status === 'ACCEPTED' || o.status === 'Confirmed') && (
+                      {o.payment_method !== 'COD' && (o.status === 'Accepted' || o.status === 'ACCEPTED' || o.status === 'Confirmed') && (
                         <button
+                          type="button"
                           onClick={() => handleOrderStatus(o.id, 'Packed')}
                           className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer flex items-center gap-1.5"
                         >
@@ -1809,8 +2035,9 @@ const FarmerDashboard = () => {
                       )}
 
                       {/* Packed: farmer marks as Out For Delivery */}
-                      {o.status === 'Packed' && (
+                      {o.payment_method !== 'COD' && o.status === 'Packed' && (
                         <button
+                          type="button"
                           onClick={() => { if(window.confirm('Mark as Out For Delivery?')) handleOrderStatus(o.id, 'Out For Delivery'); }}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer flex items-center gap-1.5"
                         >
@@ -1819,8 +2046,9 @@ const FarmerDashboard = () => {
                       )}
 
                       {/* Out For Delivery: farmer marks as Waiting Customer Confirmation */}
-                      {(o.status === 'Out For Delivery' || o.status === 'Shipped') && (
+                      {o.payment_method !== 'COD' && (o.status === 'Out For Delivery' || o.status === 'Shipped') && (
                         <button
+                          type="button"
                           onClick={() => { if(window.confirm('Mark as Delivered? This will notify the customer to confirm.')) handleOrderStatus(o.id, 'Waiting Customer Confirmation'); }}
                           className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer flex items-center gap-1.5"
                         >
@@ -1845,11 +2073,70 @@ const FarmerDashboard = () => {
 
           </div>
         </div>
-      )}
+      </>
+    )}
 
       {/* TAB CONTENT: ORDERS */}
       {activeTab === 'orders' && (
         <div className="space-y-6 max-w-4xl mx-auto animate-fade-in">
+          {pendingCodOrders.length > 0 && (
+            <div className="mb-6 bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 rounded-[2rem] p-6 shadow-lg space-y-4 animate-fade-in">
+              <div className="flex items-start gap-4">
+                <div className="bg-red-100 text-red-700 w-12 h-12 rounded-full flex items-center justify-center text-xl shrink-0 animate-bounce">
+                  🔔
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-black text-red-900">
+                    {pendingCodOrders.length} New COD Order{pendingCodOrders.length > 1 ? 's' : ''} Waiting
+                  </h3>
+                  <p className="text-sm font-bold text-red-800 mt-1">
+                    Payment Method: Cash on Delivery
+                  </p>
+                  <p className="text-xs text-red-755 font-semibold mt-1 leading-relaxed">
+                    ⚠️ No online payment will be received.<br />
+                    The customer will pay in cash during pickup or delivery.<br />
+                    Please review and accept/reject this order.
+                  </p>
+                </div>
+              </div>
+              <div className="divide-y divide-red-200/50 max-h-[300px] overflow-y-auto pr-1">
+                {pendingCodOrders.map(o => (
+                  <div key={o.id} className="py-3 flex flex-wrap justify-between items-center gap-3 first:pt-0 last:pb-0">
+                    <div>
+                      <span className="font-extrabold text-xs text-red-900 block">Order #{o.id} - {o.product_name}</span>
+                      <span className="text-[11px] text-red-750 font-medium block">Qty: {o.quantity_ordered} unit(s) | Total: &#8377;{o.total_price} | Buyer: {o.buyer_name}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={actionLoading[o.id]?.reject}
+                        onClick={() => handleOrderStatus(o.id, 'COD_REJECTED', 'reject')}
+                        className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-black rounded-lg border border-red-300 cursor-pointer transition-all flex items-center justify-center min-w-[70px] disabled:opacity-50"
+                      >
+                        {actionLoading[o.id]?.reject ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          "Reject"
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionLoading[o.id]?.accept}
+                        onClick={() => handleOrderStatus(o.id, 'COD_ACCEPTED', 'accept')}
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-black rounded-lg border-none cursor-pointer transition-all flex items-center justify-center min-w-[70px] disabled:opacity-50 shadow-sm shadow-green-700/20"
+                      >
+                        {actionLoading[o.id]?.accept ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          "Accept"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2">
               <ShoppingBag className="text-orange-500" /> Buyer Orders
@@ -1911,7 +2198,18 @@ const FarmerDashboard = () => {
               {orders.map(o => (
                 <div key={o.id} className="bg-white border border-gray-150 rounded-[2rem] p-6 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Order #{o.id}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Order #{o.id}</span>
+                      {o.payment_method === 'COD' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-green-100 text-green-800 border border-green-200">
+                          🟢 COD
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                          🔵 UPI
+                        </span>
+                      )}
+                    </div>
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${getStatusColor(o.status)}`}>
                       {getStatusLabel(o.status)}
                     </span>
@@ -1967,6 +2265,58 @@ const FarmerDashboard = () => {
                       <span className="block text-[8px] text-gray-400 uppercase">Amount</span>
                       <span className="text-lg font-black text-green-700">&#8377;{o.total_price}</span>
                     </div>
+                    {/* COD Pending Actions */}
+                    {o.status === 'COD_PENDING' && (
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          disabled={actionLoading[o.id]?.reject}
+                          onClick={() => handleOrderStatus(o.id, 'COD_REJECTED', 'reject')}
+                          className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-extrabold rounded-lg border border-red-200 cursor-pointer transition-colors flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {actionLoading[o.id]?.reject ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <>
+                              <X size={12} /> Reject
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionLoading[o.id]?.accept}
+                          onClick={() => handleOrderStatus(o.id, 'COD_ACCEPTED', 'accept')}
+                          className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                        >
+                          {actionLoading[o.id]?.accept ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <>
+                              <Check size={12} /> Accept Order
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* COD Accepted Actions */}
+                    {o.status === 'COD_ACCEPTED' && (
+                      <button
+                        type="button"
+                        disabled={actionLoading[o.id]?.complete}
+                        onClick={() => { if(window.confirm('Confirm that cash payment has been collected for this order?')) handleOrderStatus(o.id, 'Completed', 'complete'); }}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-[10px] font-extrabold rounded-lg border-none cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      >
+                        {actionLoading[o.id]?.complete ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <>
+                            <Check size={12} /> Payment Collected
+                          </>
+                        )}
+                      </button>
+                    )}
+
                     {/* Waiting Farmer Confirmation */}
                     {(o.status === 'WaitingFarmerConfirmation' || o.status === 'Waiting Farmer Confirmation') && (
                       <div className="flex gap-2 flex-wrap">
@@ -1988,7 +2338,7 @@ const FarmerDashboard = () => {
                     )}
 
                     {/* Accepted: farmer marks as Packed */}
-                    {(o.status === 'Accepted' || o.status === 'ACCEPTED' || o.status === 'Confirmed') && (
+                    {o.payment_method !== 'COD' && (o.status === 'Accepted' || o.status === 'ACCEPTED' || o.status === 'Confirmed') && (
                       <button
                         type="button"
                         onClick={() => handleOrderStatus(o.id, 'Packed')}
@@ -1999,7 +2349,7 @@ const FarmerDashboard = () => {
                     )}
 
                     {/* Packed: farmer marks as Out For Delivery */}
-                    {o.status === 'Packed' && (
+                    {o.payment_method !== 'COD' && o.status === 'Packed' && (
                       <button
                         type="button"
                         onClick={() => { if(window.confirm('Mark as Out For Delivery?')) handleOrderStatus(o.id, 'Out For Delivery'); }}
@@ -2010,7 +2360,7 @@ const FarmerDashboard = () => {
                     )}
 
                     {/* Out For Delivery: farmer marks as Waiting Customer Confirmation */}
-                    {(o.status === 'Out For Delivery' || o.status === 'Shipped') && (
+                    {o.payment_method !== 'COD' && (o.status === 'Out For Delivery' || o.status === 'Shipped') && (
                       <button
                         type="button"
                         onClick={() => { if(window.confirm('Mark as Delivered? This will notify the customer to confirm.')) handleOrderStatus(o.id, 'Waiting Customer Confirmation'); }}
@@ -2570,13 +2920,13 @@ const FarmerDashboard = () => {
                 </div>
                 <h3 className="font-black text-2xl text-gray-900">Complete Your Farmer Setup</h3>
                 <p className="text-gray-500 font-semibold text-xs mt-1">
-                  Configure your profile settings in 3 easy steps to start listing harvests and receiving direct payments.
+                  Configure your profile in 3 easy steps to start listing harvests.
                 </p>
               </div>
 
               {/* Wizard Step Progress Stepper with Labels */}
               <div className="flex items-center justify-between bg-gray-50 border border-gray-150 p-4 rounded-2xl">
-                {/* Step 1 Label */}
+                {/* Step 1: Payment Method */}
                 <div 
                   onClick={() => setWizardStep(1)}
                   className="flex flex-col items-center flex-1 cursor-pointer transition-all"
@@ -2584,20 +2934,20 @@ const FarmerDashboard = () => {
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-all ${
                     wizardStep === 1 
                       ? 'bg-green-700 text-white shadow-md ring-4 ring-green-100'
-                      : (upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId))
+                      : paymentMethods
                         ? 'bg-green-100 text-green-700 border border-green-300'
                         : 'bg-gray-105 text-gray-500 border border-gray-200'
                   }`}>
-                    {upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? '✓' : '1'}
+                    {paymentMethods ? '✓' : '1'}
                   </div>
                   <span className={`text-[10px] font-black mt-1.5 transition-colors ${wizardStep === 1 ? 'text-green-800' : 'text-gray-500'}`}>
-                    1. UPI Setup
+                    1. Payment
                   </span>
                 </div>
 
-                <div className={`flex-1 h-[2px] mx-1 transition-colors ${upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? 'bg-green-500' : 'bg-gray-200'}`} />
+                <div className={`flex-1 h-[2px] mx-1 transition-colors ${paymentMethods ? 'bg-green-500' : 'bg-gray-200'}`} />
 
-                {/* Step 2 Label */}
+                {/* Step 2: UPI / COD Info */}
                 <div 
                   onClick={() => setWizardStep(2)}
                   className="flex flex-col items-center flex-1 cursor-pointer transition-all"
@@ -2605,20 +2955,23 @@ const FarmerDashboard = () => {
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-all ${
                     wizardStep === 2 
                       ? 'bg-green-700 text-white shadow-md ring-4 ring-green-100'
-                      : (pickupLandmark && pickupLandmark.trim())
+                      : (paymentMethods === 'COD_ONLY' || (upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId)))
                         ? 'bg-green-100 text-green-700 border border-green-300'
                         : 'bg-gray-105 text-gray-500 border border-gray-200'
                   }`}>
-                    {pickupLandmark && pickupLandmark.trim() ? '✓' : '2'}
+                    {(paymentMethods === 'COD_ONLY' || (upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId))) ? '✓' : '2'}
                   </div>
                   <span className={`text-[10px] font-black mt-1.5 transition-colors ${wizardStep === 2 ? 'text-green-800' : 'text-gray-500'}`}>
-                    2. Landmark
+                    2. UPI Setup
                   </span>
                 </div>
 
-                <div className={`flex-1 h-[2px] mx-1 transition-colors ${pickupLandmark && pickupLandmark.trim() ? 'bg-green-500' : 'bg-gray-200'}`} />
+                <div className={`flex-1 h-[2px] mx-1 transition-colors ${
+                  (paymentMethods === 'COD_ONLY' || (upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId)))
+                    ? 'bg-green-500' : 'bg-gray-200'
+                }`} />
 
-                {/* Step 3 Label */}
+                {/* Step 3: Landmark + GPS */}
                 <div 
                   onClick={() => setWizardStep(3)}
                   className="flex flex-col items-center flex-1 cursor-pointer transition-all"
@@ -2626,14 +2979,14 @@ const FarmerDashboard = () => {
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-all ${
                     wizardStep === 3 
                       ? 'bg-green-700 text-white shadow-md ring-4 ring-green-100'
-                      : (detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0))
+                      : (pickupLandmark && pickupLandmark.trim() && (detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0)))
                         ? 'bg-green-100 text-green-700 border border-green-300'
                         : 'bg-gray-105 text-gray-500 border border-gray-200'
                   }`}>
-                    {detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0) ? '✓' : '3'}
+                    {(pickupLandmark && pickupLandmark.trim() && (detectedCoords || (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0))) ? '✓' : '3'}
                   </div>
                   <span className={`text-[10px] font-black mt-1.5 transition-colors ${wizardStep === 3 ? 'text-green-800' : 'text-gray-500'}`}>
-                    3. Farm GPS
+                    3. Location
                   </span>
                 </div>
               </div>
@@ -2642,14 +2995,25 @@ const FarmerDashboard = () => {
               <div className="bg-gray-50 border border-gray-150 p-4 rounded-2xl text-[11px] font-semibold text-gray-700 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-2">
-                    {upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? (
-                      <span className="text-green-600 font-black">✅ UPI ID Configured</span>
+                    {paymentMethods ? (
+                      <span className="text-green-600 font-black">✅ Payment Method: {paymentMethods === 'UPI_ONLY' ? '💳 UPI Only' : paymentMethods === 'COD_ONLY' ? '💵 Cash Only' : '💳+💵 Both'}</span>
                     ) : (
-                      <span className="text-red-500 font-black">❌ UPI ID Missing or Invalid</span>
+                      <span className="text-red-500 font-black">❌ Payment Method Not Selected</span>
                     )}
                   </span>
-                  <span className="text-[10px] text-gray-400 font-mono">{upiId || 'Not Configured'}</span>
                 </div>
+                {(paymentMethods === 'UPI_ONLY' || paymentMethods === 'BOTH') && (
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      {upiId && /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId) ? (
+                        <span className="text-green-600 font-black">✅ UPI ID Configured</span>
+                      ) : (
+                        <span className="text-red-500 font-black">❌ UPI ID Missing or Invalid</span>
+                      )}
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-mono">{upiId || 'Not Configured'}</span>
+                  </div>
+                )}
                 
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-2">
@@ -2683,48 +3047,130 @@ const FarmerDashboard = () => {
 
               {/* Form Steps */}
               <div className="space-y-5">
-                {/* Step 1: UPI ID */}
+                {/* Step 1: Payment Method Selection */}
                 {wizardStep === 1 && (
-                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-3 shadow-sm">
+                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-4 shadow-sm">
                     <div className="flex items-center justify-between border-b border-gray-100 pb-2">
                       <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
                         Step 1 of 3
                       </span>
-                      <span className="text-xs font-black text-gray-700">Payment Setup</span>
+                      <span className="text-xs font-black text-gray-700">Choose Payment Method</span>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
-                        UPI ID (for Direct Payments) *
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. farmername@okaxis, 9876543210@paytm"
-                        value={upiId}
-                        onChange={(e) => setUpiId(e.target.value)}
-                        className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-600 outline-none text-xs font-semibold text-gray-700"
-                      />
-                      <span className="text-[9px] text-gray-400 mt-1 block ml-1 leading-normal">
-                        This UPI ID will receive customer payments directly. Enter format: username@bankcode
-                      </span>
-                      <div className="mt-3.5 p-3 bg-amber-50 border border-amber-250/40 rounded-xl flex items-start gap-2 text-[10px] text-amber-800 font-semibold leading-relaxed">
-                        <span className="text-amber-600 text-sm">⚠️</span>
-                        <div>
-                          <strong className="text-amber-900 font-black block mb-0.5">Setup Warning:</strong>
-                          Double-check your UPI ID before saving. Buyer payments go directly to this ID. Incorrect details will cause payments to fail or go to the wrong account, and cannot be recovered.
-                        </div>
-                      </div>
+                    <p className="text-[11px] text-gray-500 font-semibold leading-relaxed">
+                      Which payment method would you like to accept from buyers? You must choose one to continue.
+                    </p>
+                    <div className="space-y-2.5">
+                      {[
+                        {
+                          value: 'UPI_ONLY',
+                          icon: '💳',
+                          title: 'UPI Payments Only',
+                          desc: 'Receive payments directly into your UPI account. Buyers must pay via UPI before order is confirmed.'
+                        },
+                        {
+                          value: 'COD_ONLY',
+                          icon: '💵',
+                          title: 'Cash on Delivery (COD) Only',
+                          desc: 'Customers will pay you in cash during pickup or delivery. No UPI ID required.'
+                        },
+                        {
+                          value: 'BOTH',
+                          icon: '💳+💵',
+                          title: 'Both UPI and Cash on Delivery',
+                          desc: 'Let buyers choose their preferred payment method. Requires a valid UPI ID.'
+                        },
+                      ].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setPaymentMethods(opt.value)}
+                          className={`w-full p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+                            paymentMethods === opt.value
+                              ? 'bg-green-50 border-green-600 shadow-md'
+                              : 'bg-white border-gray-200 hover:border-green-300 hover:bg-green-50/30'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="text-xl mt-0.5">{opt.icon}</span>
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between">
+                                <span className={`text-xs font-black ${paymentMethods === opt.value ? 'text-green-800' : 'text-gray-800'}`}>{opt.title}</span>
+                                {paymentMethods === opt.value && (
+                                  <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center">
+                                    <Check size={11} className="text-white" />
+                                  </div>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-500 font-medium mt-0.5 leading-relaxed">{opt.desc}</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
                     </div>
+                    {!paymentMethods && (
+                      <p className="text-[10px] text-center text-amber-700 font-bold bg-amber-50 border border-amber-200 rounded-xl py-2">⚠️ You must choose one option to continue.</p>
+                    )}
                   </div>
                 )}
 
-                {/* Step 2: Pickup Landmark */}
+                {/* Step 2: UPI Setup or COD Info */}
                 {wizardStep === 2 && (
                   <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-3 shadow-sm">
                     <div className="flex items-center justify-between border-b border-gray-100 pb-2">
                       <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
                         Step 2 of 3
                       </span>
-                      <span className="text-xs font-black text-gray-700">Pickup Logistics</span>
+                      <span className="text-xs font-black text-gray-700">
+                        {paymentMethods === 'COD_ONLY' ? 'COD Confirmed' : 'UPI Setup'}
+                      </span>
+                    </div>
+                    {paymentMethods === 'COD_ONLY' ? (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center space-y-2">
+                        <div className="text-4xl">💵</div>
+                        <h4 className="font-black text-emerald-800 text-sm">Cash on Delivery Selected</h4>
+                        <p className="text-[11px] text-emerald-700 font-semibold leading-relaxed">
+                          Great! No UPI ID is required. Customers will pay you in cash during pickup or delivery.
+                          You can always add a UPI ID later from the Settings tab.
+                        </p>
+                        <div className="mt-3 p-3 bg-white border border-emerald-200 rounded-xl text-[10px] text-gray-600 font-semibold">
+                          ✅ All payments will be collected in cash — no digital setup needed.
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
+                          UPI ID (for Direct Payments) *
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. farmername@okaxis, 9876543210@paytm"
+                          value={upiId}
+                          onChange={(e) => setUpiId(e.target.value)}
+                          className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:border-green-600 outline-none text-xs font-semibold text-gray-700"
+                        />
+                        <span className="text-[9px] text-gray-400 mt-1 block ml-1 leading-normal">
+                          This UPI ID will receive customer payments directly. Enter format: username@bankcode
+                        </span>
+                        <div className="mt-3.5 p-3 bg-amber-50 border border-amber-250/40 rounded-xl flex items-start gap-2 text-[10px] text-amber-800 font-semibold leading-relaxed">
+                          <span className="text-amber-600 text-sm">⚠️</span>
+                          <div>
+                            <strong className="text-amber-900 font-black block mb-0.5">Setup Warning:</strong>
+                            Double-check your UPI ID before saving. Buyer payments go directly to this ID. Incorrect details will cause payments to fail or go to the wrong account, and cannot be recovered.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Step 3: Pickup Landmark + Farm GPS */}
+                {wizardStep === 3 && (
+                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                      <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
+                        Step 3 of 3
+                      </span>
+                      <span className="text-xs font-black text-gray-700">Farm Location</span>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
@@ -2741,18 +3187,6 @@ const FarmerDashboard = () => {
                         Provide a well-known local landmark for buyers to find your farm easily.
                       </span>
                     </div>
-                  </div>
-                )}
-
-                {/* Step 3: Farm Geolocation */}
-                {wizardStep === 3 && (
-                  <div className="border border-gray-150 rounded-2xl p-5 bg-white space-y-3 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                      <span className="text-[10px] font-black text-green-700 uppercase tracking-widest bg-green-50 border border-green-200/50 px-2 py-0.5 rounded">
-                        Step 3 of 3
-                      </span>
-                      <span className="text-xs font-black text-gray-700">Farm Geolocation</span>
-                    </div>
                     <div>
                       <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">
                         Farm Location Coordinates (GPS) *
@@ -2768,7 +3202,7 @@ const FarmerDashboard = () => {
                       </button>
                       <span className="text-[9px] text-gray-400 mt-1.5 block ml-1 leading-normal">
                         {detectedCoords 
-                          ? `✅ Detected Coords: ${detectedCoords.lat.toFixed(6)}, ${detectedCoords.lng.toFixed(6)}`
+                          ? `✅ Detected: ${detectedCoords.lat.toFixed(6)}, ${detectedCoords.lng.toFixed(6)}`
                           : (farmLocation.lat !== 10.0 || farmLocation.lng !== 76.0)
                             ? `Using existing saved location: ${farmLocation.lat.toFixed(6)}, ${farmLocation.lng.toFixed(6)}`
                             : '⚠️ No coordinates selected. Click Detect GPS to pinpoint your farm.'
@@ -2804,21 +3238,25 @@ const FarmerDashboard = () => {
                     type="button"
                     onClick={() => {
                       if (wizardStep === 1) {
-                        const trimmedUpi = upiId.trim();
-                        if (!trimmedUpi) { alert("UPI ID is required."); return; }
-                        const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
-                        if (!upiRegex.test(trimmedUpi)) {
-                          alert("Invalid UPI ID format. E.g. farmername@okaxis, 9876543210@oksbi");
-                          return;
-                        }
+                        if (!paymentMethods) { alert("Please select a payment method to continue."); return; }
                       } else if (wizardStep === 2) {
-                        if (!pickupLandmark.trim()) { alert("Pickup Landmark is required."); return; }
+                        // UPI validation only if needed
+                        if (paymentMethods === 'UPI_ONLY' || paymentMethods === 'BOTH') {
+                          const trimmedUpi = upiId.trim();
+                          if (!trimmedUpi) { alert("UPI ID is required for your selected payment method."); return; }
+                          const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+                          if (!upiRegex.test(trimmedUpi)) {
+                            alert("Invalid UPI ID format. E.g. farmername@okaxis, 9876543210@oksbi");
+                            return;
+                          }
+                        }
+                        // COD_ONLY: skip UPI validation, proceed to step 3
                       }
                       setWizardStep(wizardStep + 1);
                     }}
                     className="flex-[2] py-3 bg-green-700 hover:bg-green-800 text-white font-extrabold rounded-xl shadow-md border-none cursor-pointer flex items-center justify-center gap-1 text-xs"
                   >
-                    Next Step
+                    Next Step →
                   </button>
                 ) : (
                   <button
@@ -2827,7 +3265,7 @@ const FarmerDashboard = () => {
                     disabled={savingSetup}
                     className="flex-[2] py-3 bg-green-700 hover:bg-green-800 text-white font-extrabold rounded-xl shadow-md border-none cursor-pointer flex items-center justify-center gap-1 text-xs disabled:opacity-60"
                   >
-                    {savingSetup ? 'Saving...' : 'Save Setup & Open Form'}
+                    {savingSetup ? 'Saving...' : 'Save Setup & Start Listing'}
                   </button>
                 )}
               </div>
@@ -2836,7 +3274,13 @@ const FarmerDashboard = () => {
         )}
       </AnimatePresence>
 
-      <FarmerBottomNav orderCount={orders.filter(o => o.status === 'Pending' || o.status === 'PENDING').length} />
+      <FarmerBottomNav orderCount={orders.filter(o => 
+        o.status === 'WaitingFarmerConfirmation' || 
+        o.status === 'Waiting Farmer Confirmation' || 
+        o.status === 'COD_PENDING' || 
+        o.status === 'Pending' || 
+        o.status === 'PENDING'
+      ).length} />
     </div>
   );
 };

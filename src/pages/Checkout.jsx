@@ -29,6 +29,7 @@ export default function Checkout() {
   const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("UPI");
+  const [farmerPaymentMethods, setFarmerPaymentMethods] = useState(null);
   const [deliveryVehicle, setDeliveryVehicle] = useState("motorcycle");
   const [step, setStep] = useState("form"); // form | payment | proof | success
   const [placedOrderId, setPlacedOrderId] = useState(null);
@@ -83,24 +84,43 @@ export default function Checkout() {
       setCart(parsedCart);
       
       const firstItem = parsedCart[0];
-      if (firstItem && firstItem.farmer_id) {
-        verificationAPI.getFarmerProfile(firstItem.farmer_id)
-          .then(res => {
-            const data = res.data;
-            const available = !!data.delivery_available;
-            setLiveDeliveryAvailable(available);
-            setLiveRate(data.delivery_price_per_km !== undefined ? data.delivery_price_per_km : 10);
-            
-            // If live delivery is false, force all items in cart to Pickup
-            if (!available) {
-              const updated = parsedCart.map(item => ({ ...item, delivery_type: "Pickup" }));
-              setCart(updated);
-              localStorage.setItem('cart', JSON.stringify(updated));
-            }
-          })
-          .catch(err => {
-            console.error("Failed to fetch live farmer settings:", err);
-          });
+      if (firstItem) {
+        // Set farmer payment methods from cart item data
+        const fpm = firstItem.farmer_payment_methods || null;
+        setFarmerPaymentMethods(fpm);
+        // Auto-set the payment method based on farmer preference
+        if (fpm === 'COD_ONLY') {
+          setPaymentMethod('COD');
+        } else {
+          setPaymentMethod('UPI');
+        }
+
+        if (firstItem.farmer_id) {
+          verificationAPI.getFarmerProfile(firstItem.farmer_id)
+            .then(res => {
+              const data = res.data;
+              const available = !!data.delivery_available;
+              setLiveDeliveryAvailable(available);
+              setLiveRate(data.delivery_price_per_km !== undefined ? data.delivery_price_per_km : 10);
+              
+              // Also sync farmer payment methods from live profile
+              if (data.payment_methods) {
+                setFarmerPaymentMethods(data.payment_methods);
+                if (data.payment_methods === 'COD_ONLY') setPaymentMethod('COD');
+                else if (data.payment_methods === 'UPI_ONLY') setPaymentMethod('UPI');
+              }
+              
+              // If live delivery is false, force all items in cart to Pickup
+              if (!available) {
+                const updated = parsedCart.map(item => ({ ...item, delivery_type: "Pickup" }));
+                setCart(updated);
+                localStorage.setItem('cart', JSON.stringify(updated));
+              }
+            })
+            .catch(err => {
+              console.error("Failed to fetch live farmer settings:", err);
+            });
+        }
       }
     }
   }, [navigate]);
@@ -558,34 +578,53 @@ export default function Checkout() {
             {/* Payment method */}
             <div className="border-t pt-6">
               <h3 className="text-xl font-bold mb-4">Payment Method</h3>
-              <div className="space-y-3">
-                {/* UPI */}
-                <button type="button" onClick={() => setPaymentMethod("UPI")}
-                  className={`flex items-center gap-4 w-full p-4 rounded-2xl border text-left cursor-pointer transition-all ${paymentMethod === "UPI" ? "bg-green-50 border-green-700 ring-2 ring-green-700/20" : "bg-white border-gray-200 hover:bg-gray-50"}`}>
-                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
-                    <QrCode size={22} className="text-green-700" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-extrabold text-gray-900">Direct UPI to Farmer</div>
-                    <div className="text-xs text-gray-500 mt-0.5">Scan QR or open GPay / PhonePe — money goes straight to farmer</div>
-                    <div className="text-[10px] font-black text-green-700 mt-1">&#10003; Zero platform fee &#183; Zero middleman</div>
-                  </div>
-                  {paymentMethod === "UPI" && <div className="w-5 h-5 bg-green-700 rounded-full flex items-center justify-center shrink-0"><CheckCircle size={12} className="text-white" /></div>}
-                </button>
+              
+              {/* Show restriction notice when only one method is allowed */}
+              {farmerPaymentMethods === 'COD_ONLY' && (
+                <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-semibold flex items-start gap-2">
+                  <span className="text-base">⚠️</span>
+                  <span>This farmer currently accepts <strong>Cash on Delivery only</strong>. UPI payment is not available for this order.</span>
+                </div>
+              )}
+              {farmerPaymentMethods === 'UPI_ONLY' && (
+                <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-800 font-semibold flex items-start gap-2">
+                  <span className="text-base">💳</span>
+                  <span>This farmer accepts <strong>UPI payments only</strong>. Cash on delivery is not available for this order.</span>
+                </div>
+              )}
 
-                {/* COD */}
-                <button type="button" onClick={() => setPaymentMethod("COD")}
-                  className={`flex items-center gap-4 w-full p-4 rounded-2xl border text-left cursor-pointer transition-all ${paymentMethod === "COD" ? "bg-amber-50 border-amber-500 ring-2 ring-amber-500/20" : "bg-white border-gray-200 hover:bg-gray-50"}`}>
-                  <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
-                    <Banknote size={22} className="text-amber-600" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-extrabold text-gray-900">Cash on Pickup / Delivery</div>
-                    <div className="text-xs text-gray-500 mt-0.5">Pay cash directly when you receive the produce</div>
-                    <div className="text-[10px] font-black text-amber-600 mt-1">Order confirmed automatically by farmer</div>
-                  </div>
-                  {paymentMethod === "COD" && <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shrink-0"><CheckCircle size={12} className="text-white" /></div>}
-                </button>
+              <div className="space-y-3">
+                {/* UPI - only show if farmer accepts UPI */}
+                {(farmerPaymentMethods !== 'COD_ONLY') && (
+                  <button type="button" onClick={() => setPaymentMethod("UPI")}
+                    className={`flex items-center gap-4 w-full p-4 rounded-2xl border text-left cursor-pointer transition-all ${paymentMethod === "UPI" ? "bg-green-50 border-green-700 ring-2 ring-green-700/20" : "bg-white border-gray-200 hover:bg-gray-50"}`}>
+                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+                      <QrCode size={22} className="text-green-700" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-extrabold text-gray-900">Direct UPI to Farmer</div>
+                      <div className="text-xs text-gray-500 mt-0.5">Scan QR or open GPay / PhonePe — money goes straight to farmer</div>
+                      <div className="text-[10px] font-black text-green-700 mt-1">&#10003; Zero platform fee &#183; Zero middleman</div>
+                    </div>
+                    {paymentMethod === "UPI" && <div className="w-5 h-5 bg-green-700 rounded-full flex items-center justify-center shrink-0"><CheckCircle size={12} className="text-white" /></div>}
+                  </button>
+                )}
+
+                {/* COD - only show if farmer accepts COD */}
+                {(farmerPaymentMethods !== 'UPI_ONLY') && (
+                  <button type="button" onClick={() => setPaymentMethod("COD")}
+                    className={`flex items-center gap-4 w-full p-4 rounded-2xl border text-left cursor-pointer transition-all ${paymentMethod === "COD" ? "bg-amber-50 border-amber-500 ring-2 ring-amber-500/20" : "bg-white border-gray-200 hover:bg-gray-50"}`}>
+                    <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+                      <Banknote size={22} className="text-amber-600" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-extrabold text-gray-900">Cash on Pickup / Delivery</div>
+                      <div className="text-xs text-gray-500 mt-0.5">Pay cash directly when you receive the produce</div>
+                      <div className="text-[10px] font-black text-amber-600 mt-1">Order confirmed automatically by farmer</div>
+                    </div>
+                    {paymentMethod === "COD" && <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shrink-0"><CheckCircle size={12} className="text-white" /></div>}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -609,7 +648,13 @@ export default function Checkout() {
               </div>
               <div>
                 <div className="font-extrabold text-gray-900 text-sm mb-1">{farmerName}</div>
-                <div className="text-[10px] text-gray-500 font-semibold mb-2">UPI: {farmerUpiId}</div>
+                {farmerPaymentMethods === 'COD_ONLY' ? (
+                  <div className="text-[10px] text-amber-700 font-bold mb-2">💵 Cash Payment Only</div>
+                ) : (
+                  farmerUpiId ? (
+                    <div className="text-[10px] text-gray-500 font-semibold mb-2">UPI: {farmerUpiId}</div>
+                  ) : null
+                )}
                 <CompactBadgeRow farmer={{
                   phone_verified: fi.farmer_phone_verified,
                   farm_verified: fi.farmer_farm_verified,

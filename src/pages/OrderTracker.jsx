@@ -350,7 +350,6 @@ function OrderTracker() {
           setEta(0);
           setDistanceLeft(0);
           setOrderStatus('Arrived');
-          updateStatusToWaitingConfirmation();
           clearInterval(interval);
           return prev;
         }
@@ -378,8 +377,14 @@ function OrderTracker() {
 
   const getStatusText = () => {
     if (backendStatus === 'Cancelled') return 'This order has been cancelled';
-    if (backendStatus === 'Rejected') return 'Order was rejected by the farmer';
+    if (backendStatus === 'Rejected' || backendStatus === 'COD_REJECTED') return 'Order was rejected by the farmer';
+    if (backendStatus === 'COD_EXPIRED') return 'This order has expired due to farmer inactivity';
     if (backendStatus === 'Disputed') return 'Order reported: Disputed. Admin review is pending.';
+    if (orderDetail?.payment_method === 'COD') {
+      if (backendStatus === 'COD_PENDING') return 'Order Placed. Farmer is reviewing your Cash on Delivery order.';
+      if (backendStatus === 'COD_ACCEPTED') return '✅ Your Cash on Delivery order has been accepted. The farmer is preparing your order. Please keep the payment ready during pickup or delivery.';
+      if (backendStatus === 'Completed') return 'Order completed! Cash payment collected. Thank you.';
+    }
     if (backendStatus === 'PendingPayment' || backendStatus === 'Pending Payment') return 'Complete your UPI payment to notify the farmer';
     if (backendStatus === 'WaitingFarmerConfirmation' || backendStatus === 'Waiting Farmer Confirmation') return 'Payment sent! Farmer is checking their notification...';
     if (backendStatus === 'Confirmed' || backendStatus === 'Accepted' || backendStatus === 'ACCEPTED') return 'Order accepted! Farmer is preparing your order.';
@@ -712,31 +717,59 @@ function OrderTracker() {
             </p>
 
             {/* Timeline Progress */}
-            <div className="relative pl-8 space-y-8 border-l-2 border-gray-100">
-              <div className="relative">
-                <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Placed')}`}>1</span>
-                <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Order Confirmed</h4>
-                <p className="text-[11px] font-bold text-gray-400 mt-0.5">Farmer accepted harvest match</p>
-              </div>
+            {orderDetail?.payment_method === 'COD' ? (
+              <div className="relative pl-8 space-y-8 border-l-2 border-gray-100">
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                    ['COD_PENDING', 'COD_ACCEPTED', 'Completed'].includes(backendStatus) ? "bg-green-700 text-white shadow-md shadow-green-700/25" : "bg-gray-100 text-gray-400"
+                  }`}>1</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Order Placed</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Awaiting farmer review</p>
+                </div>
 
-              <div className="relative">
-                <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Packaging')}`}>2</span>
-                <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Harvest Packaged</h4>
-                <p className="text-[11px] font-bold text-gray-400 mt-0.5">Produce packed and sanitized</p>
-              </div>
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                    ['COD_ACCEPTED', 'Completed'].includes(backendStatus) ? "bg-green-700 text-white shadow-md shadow-green-700/25" : "bg-gray-100 text-gray-400"
+                  }`}>2</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Order Accepted</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Farmer is preparing your order</p>
+                </div>
 
-              <div className="relative">
-                <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Delivery')}`}>3</span>
-                <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Out for Delivery</h4>
-                <p className="text-[11px] font-bold text-gray-400 mt-0.5">Rider animating on the live route</p>
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                    backendStatus === 'Completed' ? "bg-green-700 text-white shadow-md shadow-green-700/25" : "bg-gray-100 text-gray-400"
+                  }`}>3</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Completed</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Cash collected during delivery/pickup</p>
+                </div>
               </div>
+            ) : (
+              <div className="relative pl-8 space-y-8 border-l-2 border-gray-100">
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Placed')}`}>1</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Order Confirmed</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Farmer accepted harvest match</p>
+                </div>
 
-              <div className="relative">
-                <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Arrived')}`}>4</span>
-                <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Delivered</h4>
-                <p className="text-[11px] font-bold text-gray-400 mt-0.5">Fresh produce received</p>
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Packaging')}`}>2</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Harvest Packaged</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Produce packed and sanitized</p>
+                </div>
+
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Delivery')}`}>3</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Out for Delivery</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Rider animating on the live route</p>
+                </div>
+
+                <div className="relative">
+                  <span className={`absolute -left-[41px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${getTimelineStepClass('Arrived')}`}>4</span>
+                  <h4 className="font-extrabold text-sm text-gray-900 leading-tight">Delivered</h4>
+                  <p className="text-[11px] font-bold text-gray-400 mt-0.5">Fresh produce received</p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Rider Card */}

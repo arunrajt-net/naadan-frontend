@@ -571,7 +571,7 @@ const BuyerSearch = () => {
                       </div>
                       
                       {/* Delivery Availability Badge */}
-                      <div className="mb-4 text-xs font-bold flex items-center gap-1.5 px-1">
+                      <div className="mb-2 text-xs font-bold flex items-center gap-1.5 px-1">
                         {p.delivery_available ? (
                           <span className="text-green-700 bg-green-50 border border-green-200 py-1.5 px-3 rounded-xl flex items-center gap-1.5 w-full">
                             <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse" />
@@ -582,6 +582,23 @@ const BuyerSearch = () => {
                             📍 Pickup Only (collect from farm)
                           </span>
                         )}
+                      </div>
+
+                      {/* Payment Method Badge */}
+                      <div className="mb-4 text-xs font-bold flex items-center gap-1.5 px-1">
+                        {p.farmer_payment_methods === 'UPI_ONLY' ? (
+                          <span className="text-purple-700 bg-purple-50 border border-purple-200 py-1.5 px-3 rounded-xl flex items-center gap-1.5 w-full">
+                            💳 UPI Payments Only
+                          </span>
+                        ) : p.farmer_payment_methods === 'COD_ONLY' ? (
+                          <span className="text-amber-700 bg-amber-50 border border-amber-200 py-1.5 px-3 rounded-xl flex items-center gap-1.5 w-full">
+                            💵 Cash on Delivery Only
+                          </span>
+                        ) : p.farmer_payment_methods === 'BOTH' ? (
+                          <span className="text-blue-700 bg-blue-50 border border-blue-200 py-1.5 px-3 rounded-xl flex items-center gap-1.5 w-full">
+                            💳 + 💵 UPI &amp; Cash on Delivery
+                          </span>
+                        ) : null}
                       </div>
                       
                       {p.available_stock <= 0 ? (

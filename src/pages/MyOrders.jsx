@@ -20,6 +20,10 @@ const STATUS_CONFIG = {
   Rejected:                        { label: "Rejected",                 color: "bg-red-100 text-red-700 border-red-200",            dot: "bg-red-500",     step: -1 },
   Disputed:                        { label: "Disputed",                 color: "bg-red-100 text-red-700 border-red-250",            dot: "bg-red-500",     step: -2 },
   Pending:                         { label: "Awaiting Acceptance",      color: "bg-amber-100 text-amber-800 border-amber-300",      dot: "bg-amber-500",   step: 1 },
+  COD_PENDING:                     { label: "Awaiting Acceptance",      color: "bg-amber-100 text-amber-800 border-amber-300",      dot: "bg-amber-500",   step: 1 },
+  COD_ACCEPTED:                    { label: "Accepted",                 color: "bg-green-100 text-green-800 border-green-300",      dot: "bg-green-600",   step: 2 },
+  COD_REJECTED:                    { label: "Rejected",                 color: "bg-red-100 text-red-700 border-red-200",            dot: "bg-red-500",     step: -1 },
+  COD_EXPIRED:                     { label: "Expired",                  color: "bg-red-100 text-red-700 border-red-200",            dot: "bg-red-500",     step: -1 },
 };
 
 const TIMELINE_STEPS = [
@@ -68,9 +72,9 @@ function OrderTimeline({ status }) {
 
 function OrderCard({ order, onTrack, onConfirmDelivery, onCancelOrder }) {
   const [expanded, setExpanded] = useState(false);
-  const isActive = !["Completed", "Rejected", "Delivered", "Waiting Customer Confirmation"].includes(order.status);
-  const canConfirm = ["Shipped", "Delivered", "Out For Delivery", "Waiting Customer Confirmation"].includes(order.status);
-  const canTrack = ["Shipped", "Confirmed", "WaitingFarmerConfirmation", "Out For Delivery", "Accepted", "Waiting Farmer Confirmation", "Packed"].includes(order.status);
+  const isActive = !["Completed", "Rejected", "Delivered", "Waiting Customer Confirmation", "COD_REJECTED", "COD_EXPIRED"].includes(order.status);
+  const canConfirm = ["Shipped", "Delivered", "Out For Delivery", "Waiting Customer Confirmation"].includes(order.status) && order.payment_method !== "COD";
+  const canTrack = ["Shipped", "Confirmed", "WaitingFarmerConfirmation", "Out For Delivery", "Accepted", "Waiting Farmer Confirmation", "Packed", "COD_PENDING", "COD_ACCEPTED"].includes(order.status);
 
   return (
     <motion.div layout initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
@@ -84,6 +88,15 @@ function OrderCard({ order, onTrack, onConfirmDelivery, onCancelOrder }) {
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Order #{order.id}</span>
               <StatusBadge status={order.status} />
+              {order.payment_method === 'COD' ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-green-100 text-green-800 border border-green-200">
+                  🟢 COD
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                  🔵 UPI
+                </span>
+              )}
             </div>
             <h3 className="font-black text-gray-900 text-lg leading-tight">{order.product_name}</h3>
             <p className="text-sm text-gray-500 font-semibold mt-0.5">
@@ -104,10 +117,22 @@ function OrderCard({ order, onTrack, onConfirmDelivery, onCancelOrder }) {
             <p className="text-xs font-semibold text-amber-800">Payment sent! Farmer is checking GPay/PhonePe. Confirms when they verify payment.</p>
           </div>
         )}
+        {order.status === "COD_PENDING" && (
+          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+            <Clock size={13} className="text-amber-500 mt-0.5 shrink-0 animate-pulse" />
+            <p className="text-xs font-semibold text-amber-800">Order Placed. Farmer is reviewing your Cash on Delivery order.</p>
+          </div>
+        )}
         {order.status === "Confirmed" && (
           <div className="mt-3 bg-green-50 border border-green-200 rounded-xl p-3 flex items-start gap-2">
             <CheckCircle size={13} className="text-green-600 mt-0.5 shrink-0" />
             <p className="text-xs font-semibold text-green-800">Payment confirmed! Farmer is preparing your order for {order.delivery_type === "Pickup" ? "pickup" : "delivery"}.</p>
+          </div>
+        )}
+        {order.status === "COD_ACCEPTED" && (
+          <div className="mt-3 bg-green-50 border border-green-200 rounded-xl p-3 flex items-start gap-2">
+            <CheckCircle size={13} className="text-green-600 mt-0.5 shrink-0" />
+            <p className="text-xs font-semibold text-green-850">Farmer accepted your order. Collect cash during pickup/delivery.</p>
           </div>
         )}
         {order.status === "Shipped" && (
@@ -120,6 +145,18 @@ function OrderCard({ order, onTrack, onConfirmDelivery, onCancelOrder }) {
           <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
             <XCircle size={13} className="text-red-500 mt-0.5 shrink-0" />
             <p className="text-xs font-semibold text-red-800">Rejected by farmer. Contact them or place a new order.</p>
+          </div>
+        )}
+        {order.status === "COD_REJECTED" && (
+          <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+            <XCircle size={13} className="text-red-500 mt-0.5 shrink-0" />
+            <p className="text-xs font-semibold text-red-800">Rejected by farmer. Contact them or place a new order.</p>
+          </div>
+        )}
+        {order.status === "COD_EXPIRED" && (
+          <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+            <XCircle size={13} className="text-red-500 mt-0.5 shrink-0" />
+            <p className="text-xs font-semibold text-red-800">Expired because the farmer did not respond within 24 hours.</p>
           </div>
         )}
         {order.status === "Completed" && (
@@ -158,7 +195,7 @@ function OrderCard({ order, onTrack, onConfirmDelivery, onCancelOrder }) {
         </AnimatePresence>
 
         <div className="flex gap-2 mt-4 flex-wrap">
-          {["PendingPayment", "WaitingFarmerConfirmation"].includes(order.status) && onCancelOrder && (
+          {["Pending Payment", "PendingPayment", "WaitingFarmerConfirmation", "COD_PENDING"].includes(order.status) && onCancelOrder && (
             <button onClick={() => onCancelOrder(order.id)}
                     className="flex items-center gap-1.5 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-extrabold rounded-xl border border-red-200 cursor-pointer transition-colors shadow-sm">
               ❌ Cancel Order
@@ -260,11 +297,11 @@ export default function MyOrders() {
 
   const dismissNotif = (id) => setNotifications(prev => prev.filter(n => n.id !== id));
 
-  const activeCount = orders.filter(o => !["Completed","Rejected"].includes(o.status)).length;
+  const activeCount = orders.filter(o => !["Completed", "Rejected", "COD_REJECTED", "COD_EXPIRED"].includes(o.status)).length;
   const filteredOrders = orders.filter(o => {
-    if (filter === "active") return !["Completed","Rejected"].includes(o.status);
+    if (filter === "active") return !["Completed", "Rejected", "COD_REJECTED", "COD_EXPIRED"].includes(o.status);
     if (filter === "completed") return o.status === "Completed";
-    if (filter === "rejected") return o.status === "Rejected";
+    if (filter === "rejected") return ["Rejected", "COD_REJECTED", "COD_EXPIRED"].includes(o.status);
     return true;
   });
 
@@ -272,7 +309,7 @@ export default function MyOrders() {
     { key: "all",       label: "All",       count: orders.length },
     { key: "active",    label: "Active",    count: activeCount },
     { key: "completed", label: "Completed", count: orders.filter(o => o.status === "Completed").length },
-    { key: "rejected",  label: "Rejected",  count: orders.filter(o => o.status === "Rejected").length },
+    { key: "rejected",  label: "Rejected",  count: orders.filter(o => ["Rejected", "COD_REJECTED", "COD_EXPIRED"].includes(o.status)).length },
   ];
 
   return (
