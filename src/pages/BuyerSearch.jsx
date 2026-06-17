@@ -856,32 +856,34 @@ const BuyerSearch = () => {
                     >
                       <span className="text-3xl p-2.5 bg-gray-50 rounded-xl">{item.emoji}</span>
                       
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 pr-6">
                         <h4 className="font-bold text-gray-900 truncate text-base">{item.name}</h4>
                         <p className="text-xs text-gray-500 font-semibold mb-2">Farmer: {item.farmer_name}</p>
-                        <p className="text-sm font-black text-green-700">&#8377;{item.price} <span className="text-xs text-gray-400 font-medium">/ unit</span></p>
+                        <div className="flex items-center justify-between gap-4 mt-2">
+                          <p className="text-sm font-black text-green-700">&#8377;{item.price} <span className="text-xs text-gray-400 font-medium">/ unit</span></p>
+                          
+                          {/* Horizontal Quantity Modifier */}
+                          <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-xl border border-gray-150">
+                            <button 
+                              onClick={() => item.order_qty > 1 ? updateCartQty(item.id, -1) : removeFromCart(item.id)}
+                              className="p-1.5 bg-white hover:bg-red-50 rounded-lg text-gray-600 border border-gray-200 cursor-pointer flex items-center justify-center"
+                            >
+                              <Minus size={10} />
+                            </button>
+                            <span className="font-black text-xs text-gray-800 px-1 min-w-[14px] text-center">{item.order_qty}</span>
+                            <button 
+                              onClick={() => updateCartQty(item.id, 1)}
+                              className="p-1.5 bg-white hover:bg-green-50 rounded-lg text-gray-600 border border-gray-200 cursor-pointer flex items-center justify-center"
+                            >
+                              <Plus size={10} />
+                            </button>
+                          </div>
+                        </div>
                         {item.available_stock !== undefined && item.order_qty > item.available_stock && (
-                          <span className="text-[9px] font-black text-red-650 bg-red-50 px-2 py-0.5 rounded border border-red-200 block text-center mt-1 animate-pulse">
+                          <span className="text-[9px] font-black text-red-650 bg-red-50 px-2 py-0.5 rounded border border-red-200 block text-center mt-2 animate-pulse">
                             ⚠️ Exceeds Available Stock ({item.available_stock} left)
                           </span>
                         )}
-                      </div>
-
-                      {/* Quantity Modifier */}
-                      <div className="flex flex-col items-center gap-1.5">
-                        <button 
-                          onClick={() => updateCartQty(item.id, 1)}
-                          className="p-1 bg-gray-50 hover:bg-green-50 rounded text-gray-600 border border-gray-150 cursor-pointer"
-                        >
-                          <Plus size={12} />
-                        </button>
-                        <span className="font-black text-sm text-gray-800">{item.order_qty}</span>
-                        <button 
-                          onClick={() => item.order_qty > 1 ? updateCartQty(item.id, -1) : removeFromCart(item.id)}
-                          className="p-1 bg-gray-50 hover:bg-red-50 rounded text-gray-600 border border-gray-150 cursor-pointer"
-                        >
-                          <Minus size={12} />
-                        </button>
                       </div>
 
                       <button 
